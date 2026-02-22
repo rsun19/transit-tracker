@@ -10,10 +10,10 @@ class StreamerTest(SimpleTestCase):
         # Prepare a sequence of raw lines as might be returned by response.iter_lines()
         raw_lines = [
             b'data: {"a":1}',
-            b'some: ignore',
+            b"some: ignore",
             b"",
             'data: {"c": 3}',
-            b'data: invalid json',
+            b"data: invalid json",
             b'data: {"b":2}',
         ]
 
@@ -45,7 +45,9 @@ class StreamerTest(SimpleTestCase):
             def stream(self, *args, **kwargs):
                 return FakeStreamCtx(FakeResponse())
 
-        with patch("alerts.mbta_event_streamer.httpx.Client", return_value=FakeClient()):
+        with patch(
+            "alerts.mbta_event_streamer.httpx.Client", return_value=FakeClient()
+        ):
             gen = mbta_event_streamer()
             events = list(gen)
 
@@ -57,4 +59,3 @@ class StreamerTest(SimpleTestCase):
         self.assertEqual(parsed[0], {"a": 1})
         self.assertEqual(parsed[1], {"c": 3})
         self.assertEqual(parsed[2], {"b": 2})
-

@@ -5,6 +5,7 @@ from .const import MBTA_STREAMING_ALERTS_URL, MBTA_KEY
 
 import asyncio
 
+
 async def mbta_event_streamer():
     """
     Stream MBTA alerts using Server-Sent Events (SSE) asynchronously.

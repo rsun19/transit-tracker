@@ -23,6 +23,7 @@ def index(request):
 
 from asgiref.sync import sync_to_async
 
+
 async def alerts_stream(request):
     """
     Endpoint to stream MBTA alerts using Server-Sent Events (SSE).
