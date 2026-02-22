@@ -113,3 +113,23 @@
 - **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+
+## Non-Functional Requirements *(mandatory)*
+
+### Code Quality & Testing Standards
+
+- List lint/format/type-check commands to be run for this feature.
+- Define required unit + integration/contract tests (including failing tests for existing bugs) and confirm coverage target ≥90% with no regressions.
+- Note documentation updates (docstrings, usage notes) needed for new modules or APIs.
+
+### UX Consistency & Accessibility
+
+- Describe API contract expectations (naming, status codes, error envelope) and any schema versioning plan for breaking changes.
+- Specify UI states (loading, empty, error) and how they meet accessibility (WCAG AA) and design token requirements.
+- Include how data freshness/timezone/timestamp presentation stays consistent across surfaces.
+
+### Performance & Reliability
+
+- State p95 latency/throughput budgets for affected endpoints and streaming/alert pipelines (including queue lag expectations).
+- Capture frontend budgets (e.g., LCP, TTI, long-task limits) if UI is impacted.
+- Identify required observability updates: metrics, logging, alerts, and backpressure or graceful-degradation behavior.

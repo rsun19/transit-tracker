@@ -1,3 +1,5 @@
+#### Note: Please run make commands in a `Git Bash` terminal if on Windows.
+
 ## Installing:
 
 Run `make install-all` from the root or `uv sync` in this directory.
