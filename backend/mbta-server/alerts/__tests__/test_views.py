@@ -34,15 +34,15 @@ class ViewsTestCase(TestCase):
         self.assertIn(b"Failed to fetch MBTA alerts", resp.content)
 
     @patch("alerts.views.mbta_event_streamer")
-    def test_alerts_stream(self, mock_streamer):
-        def fake_generator():
+    async def test_alerts_stream(self, mock_streamer):
+        async def fake_generator():
             yield b"data: one\n\n"
             yield b"data: two\n\n"
 
         mock_streamer.return_value = fake_generator()
 
         request = self.factory.get("/alerts/stream")
-        resp = views.alerts_stream(request)
+        resp = await views.alerts_stream(request)
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Cache-Control"], "no-cache")
@@ -50,7 +50,9 @@ class ViewsTestCase(TestCase):
         self.assertEqual(resp["Content-Type"], "text/event-stream")
 
         # Collect streaming content
-        content = b"".join(list(resp.streaming_content))
+        content = b""
+        async for chunk in resp.streaming_content:
+            content += chunk
         self.assertIn(b"data: one", content)
         self.assertIn(b"data: two", content)
 

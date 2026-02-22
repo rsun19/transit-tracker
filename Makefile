@@ -3,7 +3,7 @@ VENV_DIR = backend/.venv
 VENV_PY = backend/.venv/bin/python
 VENV_PIP = backend/.venv/bin/pip
 
-.PHONY: help venv install-deps install-all run-uvicorn test lint format
+.PHONY: help venv install-deps install-all run-backend test lint format
 
 help:
 	@echo "Usage: make <target>"
@@ -12,7 +12,7 @@ help:
 	@echo "  venv           Create virtualenv at backend/.venv"
 	@echo "  install-deps   Install dependencies (uses 'uv sync' if available)"
 	@echo "  install-all    Run install-deps"
-	@echo "  run-uvicorn    Run the ASGI app via uvicorn"
+	@echo "  run-backend    Run the ASGI app via uvicorn"
 	@echo "  test           Run Django tests (backend/mbta-server)"
 
 install-deps:
@@ -39,7 +39,7 @@ install-deps:
 
 install-all: install-deps
 
-run-uvicorn:
+run-backend:
 	@if [ ! -d "$(VENV_DIR)" ]; then \
 		echo "Virtualenv does not exist. Run 'make install-all' first."; \
 		exit 1; \
@@ -50,4 +50,13 @@ run-uvicorn:
 			../../$(VENV_DIR)/Scripts/python.exe -m uvicorn mbta.asgi:application --reload --host 127.0.0.1 --port 8000; \
 		else \
 			../../$(VENV_PY) -m uvicorn mbta.asgi:application --reload --host 127.0.0.1 --port 8000; \
+		fi
+
+test:
+	@echo "Running Django tests (backend/mbta-server)"
+	cd backend/mbta-server && \
+		if [ -f "../../$(VENV_DIR)/Scripts/python.exe" ]; then \
+			../../$(VENV_DIR)/Scripts/python.exe manage.py test; \
+		else \
+			../../$(VENV_PY) manage.py test; \
 		fi

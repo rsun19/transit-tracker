@@ -9,9 +9,10 @@ In the backend directory, run:
 - Windows: `.venv\Scripts\activate`
 - Linux/Mac: `source .venv/bin/activate`
 
+
 ## Run command:
 
-`make run-uvicorn` from the root
+`make run-backend` from the root
 
 OR
 
