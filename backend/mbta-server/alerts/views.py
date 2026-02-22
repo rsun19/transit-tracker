@@ -21,7 +21,9 @@ def index(request):
         )
 
 
-def alerts_stream(request):
+
+
+async def alerts_stream(request):
     """
     Endpoint to stream MBTA alerts using Server-Sent Events (SSE).
     GET /alerts/stream
