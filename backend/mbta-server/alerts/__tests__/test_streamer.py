@@ -19,8 +19,8 @@ class StreamerTest(SimpleTestCase):
 
         class FakeResponse:
             def iter_lines(self):
-                for l in raw_lines:
-                    yield l
+                for line in raw_lines:
+                    yield line
 
         class FakeStreamCtx:
             def __init__(self, resp):

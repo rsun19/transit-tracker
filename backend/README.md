@@ -21,4 +21,5 @@ OR
 ## Linting:
 
 To check: `ruff check`
-To format: `ruff format` 
+To format: `ruff format`
+To fix: `ruff check --fix` 

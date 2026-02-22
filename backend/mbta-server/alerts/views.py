@@ -21,7 +21,6 @@ def index(request):
         )
 
 
-from asgiref.sync import sync_to_async
 
 
 async def alerts_stream(request):
