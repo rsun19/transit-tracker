@@ -1,5 +1,4 @@
 import environ
-from mbta_types import ROUTE_IDS
 
 env = environ.Env()
 
