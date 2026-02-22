@@ -11,7 +11,7 @@ Feel free to contribute to this project. Please provide an overview of your cont
 ## To run:
 
 1. Run `make install-all`
-2. Run `make run-uvicorn`
+2. Run `make run-backend`
 
 ## To test:
 
