@@ -1,0 +1,7 @@
+## Overview
+
+This is a monorepo that contains transit tracking information for multiple public transit agencies across the USA. We use readily available API endpoints to track real-time transit data.
+
+## Contributing
+
+Feel free to contribute to this project. Please provide an overview of your contribution with unit tests and testing instructions in your pull request.
