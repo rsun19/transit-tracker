@@ -31,7 +31,10 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Code Quality**: Confirm lint/format tools (ruff, eslint/formatter) and type expectations for new code; define scoped change slices (aim <400 LOC per PR) and documentation touchpoints.
+- **Testing & Coverage**: Enumerate unit + integration/contract tests, including failing tests for known bugs; target ≥90% statement coverage with no regressions.
+- **UX & API Consistency**: Describe API contract impacts (status codes, error envelope), UX states (loading/empty/error), accessibility considerations (WCAG AA), and versioning plan for any breaking change.
+- **Performance & Reliability**: Declare p95 latency/throughput budgets, alert/stream pipeline lag expectations, observability updates (metrics/logging/alerts), and backpressure/degradation strategy.
 
 ## Project Structure
 
