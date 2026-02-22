@@ -9,3 +9,10 @@
 ## Development rules
 
 - Please add all applicable unit tests after contributing code. Please make sure that all code is bug free and we achieve complete testing coverage.
+
+## Architecture docs for agents
+
+Before making non-trivial backend changes, read:
+
+- [docs/overview.md](docs/overview.md)
+- [docs/architecture.md](docs/architecture.md)
