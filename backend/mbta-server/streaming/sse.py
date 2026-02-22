@@ -13,6 +13,7 @@ async def redis_channel_sse_stream(
     channel: str,
     heartbeat_interval: float = 25.0,
     payload_transform: Callable[[Any], Any] | None = None,
+    latest_snapshot_key: str | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream broker channel messages as SSE bytes with periodic heartbeats.
 
@@ -24,8 +25,7 @@ async def redis_channel_sse_stream(
     reconnect_delay = 1.0
     max_reconnect_delay = 30.0
 
-    # Send an immediate JSON event so browser/network inspectors show content.
-    yield b"data: []\n\n"
+    sent_initial = False
 
     try:
         while True:
@@ -33,6 +33,28 @@ async def redis_channel_sse_stream(
             pubsub = None
             try:
                 client = get_redis_client_from_url(redis_url)
+
+                if not sent_initial:
+                    snapshot_payload: Any = []
+                    if latest_snapshot_key:
+                        raw_snapshot = await client.get(latest_snapshot_key)
+                        if isinstance(raw_snapshot, bytes):
+                            raw_snapshot = raw_snapshot.decode("utf-8")
+                        if raw_snapshot:
+                            try:
+                                snapshot_payload = json.loads(raw_snapshot)
+                            except json.JSONDecodeError:
+                                snapshot_payload = []
+
+                    if payload_transform is not None:
+                        try:
+                            snapshot_payload = payload_transform(snapshot_payload)
+                        except Exception:
+                            snapshot_payload = []
+
+                    yield f"data: {json.dumps(snapshot_payload)}\n\n".encode("utf-8")
+                    sent_initial = True
+
                 pubsub = client.pubsub()
                 await pubsub.subscribe(channel)
                 reconnect_delay = 1.0

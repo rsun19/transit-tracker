@@ -11,6 +11,15 @@ Primary goals:
 - Stream transformed alert data via SSE (`/alerts/stream/`)
 - Maintain one upstream MBTA stream and fan out updates to clients via Redis pub/sub
 
+`/alerts/stream/` supports optional per-client route filtering via query params:
+- `route_ids` (repeatable or comma-separated)
+- `routes` (alias; repeatable or comma-separated)
+
+Examples:
+- `/alerts/stream/?route_ids=Red,Orange`
+- `/alerts/stream/?route_ids=Red&route_ids=Orange`
+- `/alerts/stream/?routes=Blue`
+
 ## Key Directories
 
 - `mbta-server/mbta/`
@@ -25,7 +34,9 @@ Primary goals:
 - **ASGI App** (`uvicorn mbta.asgi:application`)
   - Serves HTTP and SSE endpoints.
 - **Background Worker** (`python manage.py mbta_alerts_worker`)
-  - Maintains MBTA upstream stream and publishes to Redis channel (`mbta:alerts`).
+  - Maintains MBTA upstream stream and keeps active alert state in Redis.
+  - Applies MBTA stream semantics (`reset`, `add`, `update`, `remove`) to active state.
+  - Publishes latest full snapshot to Redis channel (`mbta:alerts`) and snapshot key for replay-on-connect.
 - **Redis Broker**
   - Decouples upstream ingestion from downstream fan-out.
 

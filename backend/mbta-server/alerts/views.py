@@ -1,10 +1,48 @@
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 import requests
+from typing import Any, Callable
 
 from streaming.sse import redis_channel_sse_stream
 
-from .const import ALERTS_CHANNEL, MBTA_KEY, MBTA_ALERTS_URL, REDIS_URL
+from .const import (
+    ALERTS_CHANNEL,
+    ALERTS_LATEST_SNAPSHOT_KEY,
+    MBTA_KEY,
+    MBTA_ALERTS_URL,
+    REDIS_URL,
+)
 from .payload_transform import transform_mbta_payload_for_client
+
+
+def _parse_route_filters(request) -> set[str]:
+    """Parse route filters from query string.
+
+    Supports either repeated query params or comma-separated values:
+    - /alerts/stream?route_ids=Red&route_ids=Orange
+    - /alerts/stream?route_ids=Red,Orange
+    - /alerts/stream?routes=Red,Orange
+    """
+
+    raw_values = request.GET.getlist("route_ids") + request.GET.getlist("routes")
+    route_ids: set[str] = set()
+    for raw in raw_values:
+        for item in raw.split(","):
+            route = item.strip()
+            if route:
+                route_ids.add(route)
+    return route_ids
+
+
+def _build_stream_payload_transform(route_filters: set[str]) -> Callable[[Any], list[dict[str, Any]]]:
+    """Build a payload transform that optionally filters rows by route id."""
+
+    def _transform(payload: Any) -> list[dict[str, Any]]:
+        rows = transform_mbta_payload_for_client(payload)
+        if not route_filters:
+            return rows
+        return [row for row in rows if row.get("route") in route_filters]
+
+    return _transform
 
 
 def index(request):
@@ -31,11 +69,14 @@ async def alerts_stream(request):
     clients, adding periodic heartbeats when idle.
     """
 
+    route_filters = _parse_route_filters(request)
+
     response = StreamingHttpResponse(
         redis_channel_sse_stream(
             redis_url=REDIS_URL,
             channel=ALERTS_CHANNEL,
-            payload_transform=transform_mbta_payload_for_client,
+            payload_transform=_build_stream_payload_transform(route_filters),
+            latest_snapshot_key=ALERTS_LATEST_SNAPSHOT_KEY,
         ),
         content_type="text/event-stream",
     )

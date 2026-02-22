@@ -10,6 +10,18 @@ This document describes backend architecture and extension points for AI agents.
 4. SSE endpoint (`/alerts/stream/`) subscribes to Redis and pushes events to clients
 5. Frontend/EventSource clients consume transformed stream payloads
 
+## MBTA Stream Semantics
+
+Worker processing follows MBTA streaming event types:
+- `reset`: replace entire active-alert state with payload set
+- `add`: add new alert to active state
+- `update`: overwrite existing alert in active state
+- `remove`: delete alert from active state
+
+Important behavior:
+- Alerts omitted by a later `reset` are treated as removed (soft delete by omission).
+- After each state change, worker publishes a full active snapshot.
+
 ## Core Modules
 
 ### `alerts/const.py`
@@ -19,6 +31,7 @@ Central runtime config:
 - `MBTA_STREAMING_ALERTS_URL`
 - `REDIS_URL`
 - `ALERTS_CHANNEL`
+- `ALERTS_LATEST_SNAPSHOT_KEY`
 
 ### `alerts/management/commands/mbta_alerts_worker.py`
 Responsibilities:
@@ -31,6 +44,7 @@ Responsibilities:
 - `index`: MBTA alerts REST passthrough endpoint
 - `alerts_stream`: SSE endpoint backed by Redis pub/sub
 - Applies client payload transformation before streaming to clients
+- Supports route filtering via query params (`route_ids`, `routes` alias)
 
 ### `alerts/payload_transform.py`
 Transforms MBTA payloads to client shape:
@@ -40,7 +54,7 @@ Transforms MBTA payloads to client shape:
 Reusable primitives for future packages:
 - `broker.py`: Redis client factory
 - `codec.py`: broker message encoding/decoding
-- `sse.py`: Redis channel to SSE stream logic (heartbeat + reconnect)
+- `sse.py`: Redis channel to SSE stream logic (snapshot replay + heartbeat + reconnect)
 - `worker.py`: generic backoff loop
 - `health.py`: in-memory stream health tracking
 - `logging.py`: namespaced stream logging helpers
@@ -50,7 +64,7 @@ Reusable primitives for future packages:
 - SSE stream remains open and emits periodic heartbeats when idle.
 - Redis outage handling retries with capped backoff.
 - Worker retries on upstream failures with capped backoff.
-- Initial status/empty SSE events can be emitted before data arrives.
+- New subscribers replay the latest snapshot from Redis before live pub/sub updates.
 
 ## Extension Guidance (for new packages)
 
