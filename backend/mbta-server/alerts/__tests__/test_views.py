@@ -1,5 +1,5 @@
 from django.test import TestCase, RequestFactory
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 import requests
 
 from alerts import views
@@ -33,13 +33,13 @@ class ViewsTestCase(TestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertIn(b"Failed to fetch MBTA alerts", resp.content)
 
-    @patch("alerts.views.mbta_event_streamer")
-    async def test_alerts_stream(self, mock_streamer):
-        async def fake_generator():
-            yield b"data: one\n\n"
-            yield b"data: two\n\n"
+    @patch("alerts.views.redis_channel_sse_stream")
+    async def test_alerts_stream_uses_broker_events(self, mock_stream):
+        async def fake_stream(*args, **kwargs):
+            yield b'data: {"id": "a1", "type": "alert"}\n\n'
+            yield b'data: {"id": "a2", "type": "alert"}\n\n'
 
-        mock_streamer.return_value = fake_generator()
+        mock_stream.return_value = fake_stream()
 
         request = self.factory.get("/alerts/stream")
         resp = await views.alerts_stream(request)
@@ -49,12 +49,16 @@ class ViewsTestCase(TestCase):
         self.assertEqual(resp["X-Accel-Buffering"], "no")
         self.assertEqual(resp["Content-Type"], "text/event-stream")
 
-        # Collect streaming content
-        content = b""
+        # Collect a finite amount of streaming content
+        collected = b""
         async for chunk in resp.streaming_content:
-            content += chunk
-        self.assertIn(b"data: one", content)
-        self.assertIn(b"data: two", content)
+            collected += chunk
+            if b"a1" in collected and b"a2" in collected:
+                break
+
+        self.assertIn(b"data:", collected)
+        self.assertIn(b"\"id\": \"a1\"", collected)
+        self.assertIn(b"\"id\": \"a2\"", collected)
 
     def test_health(self):
         request = self.factory.get("/health")

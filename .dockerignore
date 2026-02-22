@@ -1,0 +1,10 @@
+.git/
+.gitignore
+**/__pycache__/
+**/*.pyc
+backend/.venv/
+backend/.ruff_cache/
+frontend/node_modules/
+frontend/.next/
+*.log
+.env*

@@ -1,5 +1,11 @@
 .env.local
 __pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+*.egg-info/
 db.sqlite3
 .ruff_cache/
 node_modules/
+specs/

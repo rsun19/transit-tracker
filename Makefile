@@ -3,7 +3,7 @@ VENV_DIR = backend/.venv
 VENV_PY = backend/.venv/bin/python
 VENV_PIP = backend/.venv/bin/pip
 
-.PHONY: help venv install-deps install-all run-backend test lint format
+.PHONY: help venv install-deps install-all run-backend test lint format start-all stop-all
 
 help:
 	@echo "Usage: make <target>"
@@ -14,6 +14,8 @@ help:
 	@echo "  install-all    Run install-deps"
 	@echo "  run-backend    Run the ASGI app via uvicorn"
 	@echo "  test           Run Django tests (backend/mbta-server)"
+	@echo "  start-all      Start backend, worker, frontend, and redis via Docker Compose (dev hot reload)"
+	@echo "  stop-all       Stop backend, worker, frontend, and redis Docker Compose stack"
 
 install-deps:
 	@echo "Installing dependencies"
@@ -60,3 +62,11 @@ test:
 		else \
 			../../$(VENV_PY) manage.py test; \
 		fi
+
+start-all:
+	@echo "Starting full stack with Docker Compose (development hot reload)"
+	docker compose -f docker-compose.yml -f docker-compose.development.yaml up --build
+
+stop-all:
+	@echo "Stopping full stack Docker Compose services"
+	docker compose -f docker-compose.yml -f docker-compose.development.yaml down
