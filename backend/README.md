@@ -31,3 +31,18 @@ OR
 To check: `ruff check`
 To format: `ruff format`
 To fix: `ruff check --fix` 
+
+## Static transit data import (Redis)
+
+Use the management command below to ingest CSV/JSON files from `backend/static` into
+versioned Redis keys, then atomically flip the `current_version` pointer only after
+successful import:
+
+1. `cd mbta-server`
+2. `python manage.py import_static_transit_data --data-version v2026Q1`
+
+Useful options:
+
+- `--static-dir <path>` to import from another folder.
+- `--namespace <prefix>` to customize Redis key prefix (default: `mbta:static:transit`).
+- `--delete-previous` to remove keys from the prior version after swap.

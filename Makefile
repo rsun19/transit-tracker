@@ -13,7 +13,7 @@ help:
 	@echo "  install-deps   Install dependencies (uses 'uv sync' if available)"
 	@echo "  install-all    Run install-deps"
 	@echo "  run-backend    Run the ASGI app via uvicorn"
-	@echo "  test           Run Django tests (backend/mbta-server)"
+	@echo "  test           Run backend pytest suite (backend/mbta-server/alerts/__tests__)"
 	@echo "  start-all      Start backend, worker, frontend, and redis via Docker Compose (dev hot reload)"
 	@echo "  stop-all       Stop backend, worker, frontend, and redis Docker Compose stack"
 
@@ -55,12 +55,12 @@ run-backend:
 		fi
 
 test:
-	@echo "Running Django tests (backend/mbta-server)"
+	@echo "Running backend pytest suite (backend/mbta-server/alerts/__tests__)"
 	cd backend/mbta-server && \
 		if [ -f "../../$(VENV_DIR)/Scripts/python.exe" ]; then \
-			../../$(VENV_DIR)/Scripts/python.exe manage.py test; \
+			../../$(VENV_DIR)/Scripts/python.exe -m pytest alerts/__tests__ -q; \
 		else \
-			../../$(VENV_PY) manage.py test; \
+			../../$(VENV_PY) -m pytest alerts/__tests__ -q; \
 		fi
 
 start-all:
