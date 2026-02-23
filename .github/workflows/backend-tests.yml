@@ -60,7 +60,7 @@ jobs:
             echo "No pyproject.toml in backend/; proceeding without installing backend deps"
           fi
 
-      - name: Run backend Django tests
+      - name: Run backend tests with pytest
         working-directory: backend/mbta-server
         run: |
-          python manage.py test
+          python -m pytest alerts/__tests__ -q
