@@ -9,3 +9,12 @@ db.sqlite3
 .ruff_cache/
 node_modules/
 specs/
+build/
+*.log
+.env*
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/

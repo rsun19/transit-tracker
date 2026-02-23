@@ -46,3 +46,18 @@ Useful options:
 - `--static-dir <path>` to import from another folder.
 - `--namespace <prefix>` to customize Redis key prefix (default: `mbta:static:transit`).
 - `--delete-previous` to remove keys from the prior version after swap.
+
+## Tracking predictions service
+
+After importing static transit data, run the tracking worker and query tracking endpoints:
+
+1. `cd mbta-server`
+2. In one terminal, run worker: `python manage.py mbta_predictions_worker`
+3. In another terminal, run API server: `python -m uvicorn mbta.asgi:application --reload --host 127.0.0.1 --port 8000`
+
+Endpoints:
+
+- SSE stream: `GET /tracking/stream/?route_id=<route_id>` (`route_id` supports repeated params or comma-separated values)
+- Available routes: `GET /tracking/routes/` returns `{"routes":[{"route_id":"Red","long_name":"Red Line"}, ...]}`
+- Station search (LIKE-style): `GET /tracking/stations/?q=<partial-name>&limit=<n>`
+- Station predictions: `GET /tracking/predictions/?station_id=<stop_id>`

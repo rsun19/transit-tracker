@@ -5,10 +5,12 @@ This document describes backend architecture and extension points for AI agents.
 ## System Diagram (Conceptual)
 
 1. MBTA API (REST + streaming source)
-2. Alerts worker (`mbta_alerts_worker`) connects upstream to MBTA
-3. Worker publishes normalized alert messages to Redis (`mbta:alerts`)
-4. SSE endpoint (`/alerts/stream/`) subscribes to Redis and pushes events to clients
-5. Frontend/EventSource clients consume transformed stream payloads
+2. Alerts worker (`mbta_alerts_worker`) connects upstream to MBTA stream
+3. Tracking worker (`mbta_predictions_worker`) polls MBTA predictions by route
+4. Workers publish normalized snapshots/messages to Redis channels/keys
+5. SSE endpoints (`/alerts/stream/`, `/tracking/stream/`) subscribe to Redis and push events to clients
+6. HTTP query endpoints (`/tracking/routes/`, `/tracking/stations/`, `/tracking/predictions/`) serve Redis-backed data
+7. Frontend/EventSource clients consume stream payloads and query endpoints
 
 ## MBTA Stream Semantics
 
@@ -50,6 +52,39 @@ Responsibilities:
 Transforms MBTA payloads to client shape:
 - `[{ route, active_period: {start, end}, cause, effect, header, description, url, lifecycle }]`
 
+### `tracking/const.py`
+Central tracking runtime config:
+- `TRACKING_PREDICTIONS_CHANNEL`
+- `TRACKING_PREDICTIONS_LATEST_SNAPSHOT_KEY`
+- station index/cache keys and route polling concurrency settings
+
+### `tracking/management/commands/mbta_predictions_worker.py`
+Responsibilities:
+- Load rapid transit routes/stops from static transit datasets in Redis
+- Poll MBTA predictions concurrently by route
+- Normalize/persist snapshot + by-route + by-stop caches
+- Publish latest snapshot to Redis for SSE fan-out and replay-on-connect
+
+### `tracking/views.py`
+- `tracking_stream`: SSE endpoint backed by Redis pub/sub for prediction snapshots
+- Optional route filtering via query param `route_id` (repeatable or comma-separated)
+- `available_route_ids`: returns available route objects with `route_id` and `long_name`
+- `search_stations`: station name query against Redis-backed station index
+- `station_predictions`: station-specific prediction rows
+
+### `tracking/static_dataset.py`
+Helpers for versioned static transit dataset reads from Redis:
+- route metadata (`route_id`, `long_name`)
+- route id lists for worker polling
+- rapid transit stops dataset reads
+
+### `tracking/prediction_cache.py`
+Redis persistence/projection helpers for tracking predictions:
+- write latest snapshot
+- read latest snapshot
+- read by route
+- read by stop/station
+
 ### Shared `streaming/` package
 Reusable primitives for future packages:
 - `broker.py`: Redis client factory
@@ -65,6 +100,7 @@ Reusable primitives for future packages:
 - Redis outage handling retries with capped backoff.
 - Worker retries on upstream failures with capped backoff.
 - New subscribers replay the latest snapshot from Redis before live pub/sub updates.
+- Tracking worker uses concurrent route polling and publishes full snapshot updates for consistent client state.
 
 ## Extension Guidance (for new packages)
 
@@ -81,9 +117,11 @@ When adding new stream-capable packages/apps:
   - payload transform
   - codec helpers
   - stream utility behavior where practical
+  - tracking route/station/prediction cache and static dataset helpers
 - Integration tests for:
   - `/alerts/stream/` response format and headers
   - worker publish path (mock upstream and/or Redis client)
+  - `/tracking/stream/`, `/tracking/routes/`, `/tracking/stations/`, `/tracking/predictions/`
 
 ## Operational Notes
 
