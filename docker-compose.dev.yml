@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app/backend
+      - /app/backend/node_modules
+    environment:
+      NODE_ENV: development
+    command: npm run start:dev
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+      target: development
+    volumes:
+      - ./backend:/app/backend
+      - /app/backend/node_modules
+    environment:
+      NODE_ENV: development
+    command: npm run start:worker:dev
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: development
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/frontend/node_modules
+    environment:
+      NODE_ENV: development
+    command: npm run dev
