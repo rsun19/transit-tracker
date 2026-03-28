@@ -34,6 +34,18 @@ Open **http://localhost** once all containers are healthy (~3–5 min on first r
 
 > Get a free MBTA API key at https://api-v3.mbta.com/
 
+### Development (hot reload)
+
+Use `docker-compose.dev.yml` for local development — source files are mounted as volumes so changes reload automatically without rebuilding:
+
+```bash
+docker-compose -f docker-compose.dev.yml up --build
+```
+
+- **Backend** restarts on file changes via NestJS watch mode
+- **Frontend** uses Next.js Fast Refresh
+- **Worker** restarts on file changes
+
 See [docs/development.md](docs/development.md) for the full setup guide, dev workflow, and troubleshooting.
 
 ---

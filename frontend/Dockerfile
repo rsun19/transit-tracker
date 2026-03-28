@@ -11,7 +11,7 @@ WORKDIR /app/frontend
 RUN npm ci
 
 COPY frontend/src ./src
-COPY frontend/next.config.ts ./
+COPY frontend/next.config.mjs ./
 
 RUN npm run build
 

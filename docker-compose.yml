@@ -80,6 +80,7 @@ services:
       dockerfile: frontend/Dockerfile
     environment:
       NODE_ENV: production
+      BACKEND_URL: http://backend:3000
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3001/api/health || exit 1"]
       interval: 15s

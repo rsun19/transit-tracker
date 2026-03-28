@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint \"{src,tests}/**/*.{ts,tsx}\" --max-warnings 0",
+    "lint:fix": "eslint \"{src,tests}/**/*.{ts,tsx}\" --fix",
     "format": "prettier --write \"{src,tests}/**/*.{ts,tsx}\"",
     "test": "jest",
     "test:watch": "jest --watch",

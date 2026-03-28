@@ -15,33 +15,33 @@ import { Agency } from '../../agencies/entities/agency.entity.js';
 @Index(['agencyId', 'routeType'])
 export class Route {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'agency_id', type: 'uuid' })
-  agencyId: string;
+  agencyId!: string;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE', eager: false })
   @JoinColumn({ name: 'agency_id' })
-  agency: Agency;
+  agency!: Agency;
 
   @Column({ name: 'route_id', type: 'varchar', length: 100 })
-  routeId: string;
+  routeId!: string;
 
   @Column({ name: 'short_name', type: 'varchar', length: 50, nullable: true })
-  shortName: string | null;
+  shortName!: string | null;
 
   @Column({ name: 'long_name', type: 'text', nullable: true })
-  longName: string | null;
+  longName!: string | null;
 
   @Column({ name: 'route_type', type: 'smallint' })
-  routeType: number;
+  routeType!: number;
 
   @Column({ name: 'color', type: 'varchar', length: 6, nullable: true })
-  color: string | null;
+  color!: string | null;
 
   @Column({ name: 'text_color', type: 'varchar', length: 6, nullable: true })
-  textColor: string | null;
+  textColor!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
-  createdAt: Date;
+  createdAt!: Date;
 }

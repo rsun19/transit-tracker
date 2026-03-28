@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, Interval } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { AgenciesService } from '../agencies/agencies.service.js';
@@ -7,7 +7,7 @@ import { GtfsRealtimeService } from './gtfs-realtime.service.js';
 import { REALTIME_POLL_INTERVAL_MS } from '../../common/constants.js';
 
 @Injectable()
-export class IngestionScheduler {
+export class IngestionScheduler implements OnModuleInit {
   private readonly logger = new Logger(IngestionScheduler.name);
 
   constructor(
@@ -16,6 +16,12 @@ export class IngestionScheduler {
     private readonly gtfsStaticService: GtfsStaticService,
     private readonly gtfsRealtimeService: GtfsRealtimeService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    this.logger.log('Running initial GTFS static ingestion on startup');
+    // Run in background so the worker process fully starts first
+    setTimeout(() => void this.runStaticIngestion(), 5000);
+  }
 
   @Cron(process.env['GTFS_STATIC_CRON'] ?? '0 4 * * *')
   async runStaticIngestion(): Promise<void> {

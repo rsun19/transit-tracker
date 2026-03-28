@@ -11,6 +11,7 @@
     "start:worker": "node dist/worker",
     "start:worker:dev": "nest start --config nest-cli.worker.json --watch",
     "lint": "eslint \"{src,tests}/**/*.ts\" --max-warnings 0",
+    "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix",
     "format": "prettier --write \"{src,tests}/**/*.ts\"",
     "test": "jest",
     "test:watch": "jest --watch",

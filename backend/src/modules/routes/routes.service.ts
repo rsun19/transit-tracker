@@ -56,7 +56,7 @@ export class RoutesService {
     }
 
     const [routes, total] = await qb
-      .orderBy('r.short_name', 'ASC')
+      .orderBy('r.shortName', 'ASC')
       .skip(offset)
       .take(limit)
       .getManyAndCount();
@@ -89,7 +89,7 @@ export class RoutesService {
       .leftJoin('s.agency', 'a')
       .where('s.shape_id = (SELECT t.shape_id FROM trips t WHERE t.route_id = :routeId AND t.agency_id = r.agency_id LIMIT 1)')
       .andWhere('a.agency_key = :agencyKey', { agencyKey })
-      .orderBy('s.pt_sequence', 'ASC')
+      .orderBy('s.ptSequence', 'ASC')
       .getMany();
 
     let shape: GeoJsonLineString | null = null;

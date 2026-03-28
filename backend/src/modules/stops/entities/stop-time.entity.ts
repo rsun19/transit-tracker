@@ -6,38 +6,38 @@ import { Agency } from '../../agencies/entities/agency.entity.js';
 @Index(['agencyId', 'stopId', 'departureTime'])
 export class StopTime {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'agency_id', type: 'uuid' })
-  agencyId: string;
+  agencyId!: string;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE', eager: false })
   @JoinColumn({ name: 'agency_id' })
-  agency: Agency;
+  agency!: Agency;
 
   @Column({ name: 'trip_id', type: 'varchar', length: 100 })
-  tripId: string;
+  tripId!: string;
 
   @Column({ name: 'stop_id', type: 'varchar', length: 100 })
-  stopId: string;
+  stopId!: string;
 
   @Column({ name: 'stop_sequence', type: 'integer' })
-  stopSequence: number;
+  stopSequence!: number;
 
   // Stored as INTERVAL (seconds past midnight) to support GTFS post-midnight times (e.g. 25:00:00)
   @Column({ name: 'arrival_time', type: 'interval', nullable: true })
-  arrivalTime: string | null;
+  arrivalTime!: string | null;
 
   // Stored as INTERVAL (seconds past midnight) to support GTFS post-midnight times (e.g. 25:00:00)
   @Column({ name: 'departure_time', type: 'interval', nullable: true })
-  departureTime: string | null;
+  departureTime!: string | null;
 
   @Column({ name: 'stop_headsign', type: 'text', nullable: true })
-  stopHeadsign: string | null;
+  stopHeadsign!: string | null;
 
   @Column({ name: 'pickup_type', type: 'smallint', nullable: true })
-  pickupType: number | null;
+  pickupType!: number | null;
 
   @Column({ name: 'drop_off_type', type: 'smallint', nullable: true })
-  dropOffType: number | null;
+  dropOffType!: number | null;
 }

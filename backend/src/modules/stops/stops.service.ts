@@ -67,7 +67,7 @@ export class StopsService {
     qb.andWhere('(s.stop_name ILIKE :q OR s.stop_code ILIKE :q)', { q: `%${q}%` });
 
     const rawResults = await qb
-      .orderBy('s.stop_name', 'ASC')
+      .orderBy('s.stopName', 'ASC')
       .skip(offset)
       .take(cappedLimit)
       .getRawAndEntities();
