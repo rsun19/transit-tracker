@@ -118,7 +118,7 @@ export class StopsService {
        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
        JOIN service_calendars sc ON sc.service_id = t.service_id AND sc.agency_id = t.agency_id
-       JOIN agencies a ON a.agency_id = st.agency_id
+       JOIN agencies a ON a."agencyId" = st.agency_id
        WHERE st.stop_id = $1
          AND a.agency_key = $2
          AND sc.${dayCol} = true
@@ -160,7 +160,7 @@ export class StopsService {
        FROM stop_times st
        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
-       JOIN agencies a ON a.agency_id = st.agency_id
+       JOIN agencies a ON a."agencyId" = st.agency_id
        WHERE st.stop_id = $1 AND a.agency_key = $2
        ORDER BY r.short_name ASC`,
       [stopId, agencyKey],
@@ -214,7 +214,7 @@ export class StopsService {
                 ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
               ) AS distance_metres
        FROM stops s
-       JOIN agencies a ON a.agency_id = s.agency_id
+       JOIN agencies a ON a."agencyId" = s.agency_id
        WHERE ST_DWithin(
            s.location::geography,
            ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,

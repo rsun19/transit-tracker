@@ -4,7 +4,7 @@
     "displayName": "MBTA",
     "timezone": "America/New_York",
     "gtfsStaticUrl": "https://cdn.mbta.com/MBTA_GTFS.zip",
-    "gtfsRealtimeUrl": "https://api-v3.mbta.com/gtfs_rt/VehiclePositions.pb",
+    "gtfsRealtimeUrl": "https://cdn.mbta.com/realtime/VehiclePositions.pb",
     "apiKeyEnvVar": "MBTA_API_KEY"
   }
 ]

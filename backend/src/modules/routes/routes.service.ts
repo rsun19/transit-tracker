@@ -87,7 +87,7 @@ export class RoutesService {
     const shapePoints = await this.shapeRepo
       .createQueryBuilder('s')
       .leftJoin('s.agency', 'a')
-      .where('s.shape_id = (SELECT t.shape_id FROM trips t WHERE t.route_id = :routeId AND t.agency_id = r.agency_id LIMIT 1)')
+      .where('s.shape_id = (SELECT t.shape_id FROM trips t WHERE t.route_id = :routeId AND t.agency_id = s.agency_id LIMIT 1)')
       .andWhere('a.agency_key = :agencyKey', { agencyKey })
       .orderBy('s.ptSequence', 'ASC')
       .getMany();

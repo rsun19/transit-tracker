@@ -59,7 +59,7 @@ export class TripsService {
        FROM trips t
        JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
        JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = t.agency_id
-       JOIN agencies a ON a.agency_id = t.agency_id
+       JOIN agencies a ON a."agencyId" = t.agency_id
        WHERE t.trip_id = $1 AND a.agency_key = $2
        ORDER BY st.stop_sequence ASC`,
       [tripId, agencyKey],

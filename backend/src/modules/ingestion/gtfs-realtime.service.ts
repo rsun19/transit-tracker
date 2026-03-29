@@ -128,7 +128,7 @@ export class GtfsRealtimeService {
   private async getValidTripIds(agencyKey: string): Promise<Set<string>> {
     const rows = await this.dataSource.query<Array<{ trip_id: string }>>(
       `SELECT t.trip_id FROM trips t
-       JOIN agencies a ON a.agency_id = t.agency_id
+       JOIN agencies a ON a."agencyId" = t.agency_id
        WHERE a.agency_key = $1`,
       [agencyKey],
     );

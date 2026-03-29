@@ -5,6 +5,7 @@ WORKDIR /app
 COPY backend/package.json ./backend/package.json
 COPY backend/package-lock.json ./backend/package-lock.json
 COPY backend/tsconfig.json ./backend/tsconfig.json
+COPY backend/nest-cli.json ./backend/nest-cli.json
 COPY tsconfig.base.json ./
 COPY config/ ./config/
 
