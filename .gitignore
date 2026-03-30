@@ -6,7 +6,7 @@ static/gtfs
 .pnp.js
 
 # Build outputs
-dist/
+**/dist/
 build/
 .next/
 out/
