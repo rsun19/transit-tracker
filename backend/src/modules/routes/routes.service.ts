@@ -11,6 +11,14 @@ export interface GeoJsonLineString {
   coordinates: [number, number][];
 }
 
+export interface RouteStopResponse {
+  stopId: string;
+  stopName: string;
+  latitude: number;
+  longitude: number;
+  stopSequence: number;
+}
+
 export interface RouteResponse {
   id: string;
   agencyKey?: string;
@@ -20,6 +28,7 @@ export interface RouteResponse {
   routeType: number;
   color: string | null;
   textColor: string | null;
+  stops?: RouteStopResponse[];
   shape?: GeoJsonLineString | null;
 }
 
@@ -71,7 +80,7 @@ export class RoutesService {
   }
 
   async findOne(routeId: string, agencyKey: string): Promise<RouteResponse> {
-    const cacheKey = `cache:route:${agencyKey}:${routeId}`;
+    const cacheKey = `cache:route:v2:${agencyKey}:${routeId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as RouteResponse;
 
@@ -83,26 +92,87 @@ export class RoutesService {
 
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
 
-    // Assemble shape GeoJSON from ordered shape points
-    const shapePoints = await this.shapeRepo
-      .createQueryBuilder('s')
-      .leftJoin('s.agency', 'a')
-      .where('s.shape_id = (SELECT t.shape_id FROM trips t WHERE t.route_id = :routeId AND t.agency_id = s.agency_id LIMIT 1)')
-      .andWhere('a.agency_key = :agencyKey', { agencyKey })
-      .orderBy('s.ptSequence', 'ASC')
-      .getMany();
+    // Resolve one representative shape_id for the route first.
+    // Avoiding a correlated subquery here prevents very slow scans on large shape/trip tables.
+    const tripRows = await this.routeRepo.query<Array<{ trip_id: string; shape_id: string | null }>>(
+      `SELECT t.trip_id, t.shape_id
+       FROM trips t
+       JOIN agencies a ON a."agencyId" = t.agency_id
+       WHERE t.route_id = $1
+         AND a.agency_key = $2
+         AND EXISTS (
+           SELECT 1
+           FROM stop_times st
+           WHERE st.trip_id = t.trip_id
+             AND st.agency_id = t.agency_id
+         )
+       ORDER BY t.trip_id ASC
+       LIMIT 1`,
+      [routeId, agencyKey],
+    );
+
+    const tripId = tripRows[0]?.trip_id ?? null;
+    const shapeId = tripRows[0]?.shape_id ?? null;
+
+    const stops = tripId
+      ? await this.routeRepo.query<RouteStopResponse[]>(
+          `SELECT
+             s.stop_id AS "stopId",
+             s.stop_name AS "stopName",
+             ST_Y(s.location::geometry) AS latitude,
+             ST_X(s.location::geometry) AS longitude,
+             st.stop_sequence AS "stopSequence"
+           FROM stop_times st
+           JOIN agencies a ON a."agencyId" = st.agency_id
+           JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = st.agency_id
+           WHERE st.trip_id = $1
+             AND a.agency_key = $2
+           ORDER BY st.stop_sequence ASC`,
+          [tripId, agencyKey],
+        )
+      : [];
+
+    const shapePoints = shapeId
+      ? await this.shapeRepo
+          .createQueryBuilder('s')
+          .leftJoin('s.agency', 'a')
+          .where('s.shape_id = :shapeId', { shapeId })
+          .andWhere('a.agency_key = :agencyKey', { agencyKey })
+          .orderBy('s.ptSequence', 'ASC')
+          .getMany()
+      : [];
 
     let shape: GeoJsonLineString | null = null;
     if (shapePoints.length >= 2) {
-      // location is stored as WKT — parse coordinates from PostGIS
+      // TypeORM may hydrate geometry as GeoJSON object or WKT string depending on driver/query path.
       const coords = shapePoints.map((p) => {
-        const match = String(p.location).match(/POINT\(([^ ]+) ([^ )]+)\)/);
-        return match ? [parseFloat(match[1]), parseFloat(match[2])] as [number, number] : [0, 0] as [number, number];
+        const location = p.location as unknown;
+
+        if (
+          location &&
+          typeof location === 'object' &&
+          'coordinates' in (location as Record<string, unknown>)
+        ) {
+          const coordinates = (location as { coordinates?: unknown }).coordinates;
+          if (
+            Array.isArray(coordinates) &&
+            coordinates.length >= 2 &&
+            typeof coordinates[0] === 'number' &&
+            typeof coordinates[1] === 'number'
+          ) {
+            return [coordinates[0], coordinates[1]] as [number, number];
+          }
+        }
+
+        const match = String(location).match(/POINT\(([^ ]+) ([^ )]+)\)/);
+        return match
+          ? [parseFloat(match[1]), parseFloat(match[2])] as [number, number]
+          : [0, 0] as [number, number];
       });
       shape = { type: 'LineString', coordinates: coords };
     }
 
-    const result: RouteResponse = { ...this.toResponse(route), shape };
+    const result: RouteResponse = { ...this.toResponse(route), stops, shape };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ROUTES_TTL_S);
     return result;
   }

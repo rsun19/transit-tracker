@@ -162,7 +162,7 @@ Both keys are written atomically via a Redis pipeline on each realtime poll cycl
 | Key pattern | TTL | Invalidation |
 |-------------|-----|-------------|
 | `cache:routes:{agencyKey}` | 300 s | Expires naturally; refreshed after GTFS static ingest |
-| `cache:route:{agencyKey}:{routeId}` | 300 s | — |
+| `cache:route:v2:{agencyKey}:{routeId}` | 300 s | — |
 | `cache:stop:departures:{agencyKey}:{stopId}:{bucket}` | 20 s | — |
 | `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}` | 45 s | — |
 
@@ -170,25 +170,18 @@ Both keys are written atomically via a Redis pipeline on each realtime poll cycl
 
 ---
 
-## Ingestion Transaction Pattern
+## Ingestion Pattern
 
-Each agency's static GTFS ingest runs inside a single `SERIALIZABLE` transaction:
+Each agency's static GTFS ingest uses **auto-committed batches** (no wrapping transaction). A single `SERIALIZABLE` transaction across 4M+ rows causes PostgreSQL WAL overflow and crashes on low-memory hosts.
 
-```sql
-BEGIN;
-  DELETE FROM stop_times   WHERE agency_id = $agencyId;
-  DELETE FROM shapes       WHERE agency_id = $agencyId;
-  DELETE FROM trips        WHERE agency_id = $agencyId;
-  DELETE FROM stop_times   WHERE agency_id = $agencyId;
-  DELETE FROM routes       WHERE agency_id = $agencyId;
-  DELETE FROM stops        WHERE agency_id = $agencyId;
-  DELETE FROM service_calendars WHERE agency_id = $agencyId;
-  -- INSERT new data in 1000-row batches
-  INSERT INTO routes ... (batch 1)
-  INSERT INTO routes ... (batch 2)
-  ...
-COMMIT;
-UPDATE agencies SET last_ingested_at = NOW() WHERE agency_id = $agencyId;
-```
+Order of operations:
+1. Upsert agency row
+2. DELETE existing child rows (stop_times → trips → shapes → calendars → stops → routes)
+3. `ALTER TABLE stop_times SET UNLOGGED` / `shapes SET UNLOGGED` — eliminates WAL writes during bulk insert
+4. INSERT routes, stops, trips (500-row batches, committed immediately)
+5. Stream-insert shapes (500-row batches)
+6. Stream-insert stop_times (1000-row batches)
+7. INSERT service_calendars (500-row batches)
+8. `UPDATE agencies SET last_ingested_at = NOW()`
 
-If any step fails, the entire transaction rolls back and the previous data remains intact. No other agency's rows are touched.
+Because there is no wrapping transaction, a mid-ingest crash leaves the table partially populated. The worker will retry on the next scheduled cron run (default: 04:00 daily) or on the next startup if `GTFS_INGEST_ON_STARTUP=true`. No other agency's rows are touched.

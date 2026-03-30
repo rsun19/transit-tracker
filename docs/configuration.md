@@ -38,6 +38,7 @@ Add one variable per agency that requires an API key. The name must match the `a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `GTFS_INGEST_ON_STARTUP` | `false` | Set to `true` to run a full static GTFS ingest every time the worker starts. Useful when setting up a new environment. |
 | `GTFS_STATIC_CRON` | `0 4 * * *` | Cron expression controlling when the worker downloads and re-imports static GTFS feeds. Default is 4:00 AM daily. |
 | `GTFS_REALTIME_POLL_INTERVAL_MS` | `15000` | How often (milliseconds) the worker polls GTFS-Realtime feeds for vehicle positions and alerts. |
 
@@ -86,10 +87,11 @@ The agency config file is a JSON array. Each element configures one transit prov
    ```sh
    docker compose restart worker
    ```
-4. Trigger an initial ingest:
+4. Trigger an initial ingest by setting `GTFS_INGEST_ON_STARTUP=true` in `.env` and restarting the worker:
    ```sh
-   docker compose exec worker node -e "require('./dist/worker/ingestion/worker-bootstrap').runOnce()"
+   docker compose restart worker
    ```
+   You can set it back to `false` after the first successful ingest.
 
 ---
 

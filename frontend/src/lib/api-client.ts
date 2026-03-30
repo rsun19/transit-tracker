@@ -19,6 +19,13 @@ export interface Route {
   routeType: number;
   color: string | null;
   textColor: string | null;
+  stops?: {
+    stopId: string;
+    stopName: string;
+    latitude: number;
+    longitude: number;
+    stopSequence: number;
+  }[];
   shape?: GeoJsonLineString | null;
 }
 

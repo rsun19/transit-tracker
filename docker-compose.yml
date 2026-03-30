@@ -70,6 +70,7 @@ services:
       WORKER_FILE_LIVENESS_PATH: /tmp/worker-alive
       NODE_ENV: production
       NODE_OPTIONS: "--max-old-space-size=300"
+      GTFS_INGEST_ON_STARTUP: ${GTFS_INGEST_ON_STARTUP:-false}
     env_file:
       - .env
     depends_on:
