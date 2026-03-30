@@ -1,14 +1,12 @@
-static/gtfs
-
 # Dependencies
 **/node_modules/
 .pnp
 .pnp.js
 
 # Build outputs
-dist/
-build/
-.next/
+**/dist/
+**/build/
+**/.next/
 out/
 
 # Environment variables
@@ -42,4 +40,5 @@ coverage/
 # Docker
 docker-compose.override.yml
 
+# Playwright MCP files
 .playwright-mcp/
