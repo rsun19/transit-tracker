@@ -91,5 +91,3 @@ docker-compose.yml Production/preview stack
 ```
 
 ---
-
-docker logs -f transit-tracker-worker-1 2>&1 | grep --line-buffered -v "Discarding\|Realtime poll complete\|warn"
