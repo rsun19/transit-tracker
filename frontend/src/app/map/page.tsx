@@ -8,7 +8,12 @@ import Box from '@mui/material/Box';
 import Alert from '@mui/material/Alert';
 import Skeleton from '@mui/material/Skeleton';
 import { usePolling } from '@/lib/hooks/usePolling';
-import { fetchVehicles, fetchAlerts, type Vehicle, type Alert as TransitAlert } from '@/lib/api-client';
+import {
+  fetchVehicles,
+  fetchAlerts,
+  type Vehicle,
+  type Alert as TransitAlert,
+} from '@/lib/api-client';
 
 const VehicleMap = dynamic(
   () => import('@/components/map/VehicleMap').then((m) => ({ default: m.VehicleMap })),
@@ -23,10 +28,7 @@ const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 export default function MapPage() {
   const vehicleFetcher = useCallback(
-    () =>
-      fetchVehicles(DEFAULT_AGENCY).then((res) =>
-        res.data.flatMap((a) => a.vehicles),
-      ),
+    () => fetchVehicles(DEFAULT_AGENCY).then((res) => res.data.flatMap((a) => a.vehicles)),
     [],
   );
 
@@ -45,8 +47,7 @@ export default function MapPage() {
   const { data: alerts } = usePolling<TransitAlert[]>(30_000, alertFetcher);
 
   const isStale =
-    vehicleUpdatedAt != null &&
-    Date.now() - vehicleUpdatedAt.getTime() > STALE_THRESHOLD_MS;
+    vehicleUpdatedAt != null && Date.now() - vehicleUpdatedAt.getTime() > STALE_THRESHOLD_MS;
 
   const displayedVehicles = useMemo(() => vehicles ?? [], [vehicles]);
 
@@ -83,10 +84,7 @@ export default function MapPage() {
         {vehicleLoading && !vehicles ? (
           <Skeleton variant="rectangular" width="100%" height="100%" />
         ) : (
-          <VehicleMap
-            vehicles={displayedVehicles}
-            error={vehicleError}
-          />
+          <VehicleMap vehicles={displayedVehicles} error={vehicleError} />
         )}
       </Box>
     </Box>

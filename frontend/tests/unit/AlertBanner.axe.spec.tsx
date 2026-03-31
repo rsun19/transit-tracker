@@ -19,9 +19,7 @@ describe('AlertBanner accessibility', () => {
   });
 
   it('has no axe violations with error severity', async () => {
-    const { container } = render(
-      <AlertBanner severity="error" message="Could not load data" />,
-    );
+    const { container } = render(<AlertBanner severity="error" message="Could not load data" />);
     const results = await axe(container);
     expect(results).toHaveNoViolations();
   });

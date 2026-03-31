@@ -21,7 +21,9 @@ function formatTime(isoString: string): string {
 
 export function DepartureRow({ departure }: DepartureRowProps) {
   const hasDelay =
-    departure.hasRealtime && departure.realtimeDelaySeconds !== null && departure.realtimeDelaySeconds !== 0;
+    departure.hasRealtime &&
+    departure.realtimeDelaySeconds !== null &&
+    departure.realtimeDelaySeconds !== 0;
 
   return (
     <TableRow hover>

@@ -3,9 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import fetch from 'node-fetch';
 import { transit_realtime } from 'gtfs-realtime-bindings';
-import { CacheService } from '../cache/cache.service.js';
-import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service.js';
-import { VEHICLE_CACHE_TTL_S, ALERTS_CACHE_TTL_S } from '../../common/constants.js';
+import { CacheService } from '../cache/cache.service';
+import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service';
+import { VEHICLE_CACHE_TTL_S, ALERTS_CACHE_TTL_S } from '../../common/constants';
 
 interface VehiclePosition {
   vehicleId: string;
@@ -91,10 +91,8 @@ export class GtfsRealtimeService {
         const alert = entity.alert;
         alerts.push({
           alertId: entity.id ?? 'unknown',
-          headerText:
-            alert.headerText?.translation?.[0]?.text ?? '',
-          descriptionText:
-            alert.descriptionText?.translation?.[0]?.text ?? '',
+          headerText: alert.headerText?.translation?.[0]?.text ?? '',
+          descriptionText: alert.descriptionText?.translation?.[0]?.text ?? '',
           routeIds: (alert.informedEntity ?? [])
             .map((e) => e.routeId)
             .filter((id): id is string => Boolean(id)),

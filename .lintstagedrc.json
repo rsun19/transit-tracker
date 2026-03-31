@@ -1,0 +1,5 @@
+{
+  "backend/**/*.{ts,tsx}": ["npm --prefix backend exec -- eslint --max-warnings 0 --fix"],
+  "frontend/**/*.{ts,tsx}": ["npm --prefix frontend exec -- eslint --max-warnings 0 --fix"],
+  "**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}": ["prettier --write"]
+}

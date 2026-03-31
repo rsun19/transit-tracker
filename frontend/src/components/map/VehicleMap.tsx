@@ -54,7 +54,14 @@ export function VehicleMap({
       {error && (
         <Alert
           severity="warning"
-          sx={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, maxWidth: 400 }}
+          sx={{
+            position: 'absolute',
+            top: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            maxWidth: 400,
+          }}
         >
           Live tracking temporarily unavailable
         </Alert>
@@ -71,7 +78,13 @@ export function VehicleMap({
         />
 
         {routeLines.map((line) => (
-          <Polyline key={line.id} positions={line.positions} color={line.color} weight={3} opacity={0.6} />
+          <Polyline
+            key={line.id}
+            positions={line.positions}
+            color={line.color}
+            weight={3}
+            opacity={0.6}
+          />
         ))}
 
         {vehicles.map((v) => (

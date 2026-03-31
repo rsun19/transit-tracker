@@ -1,0 +1,295 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run lint
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run test:unit
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm run test:integration
+
+  contract:
+    name: contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm run test:contract
+
+  accessibility:
+    name: accessibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix frontend
+      - run: npm run test:a11y
+
+  performance:
+    name: performance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:performance
+
+  peer-review-validation:
+    name: peer-review-validation
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Collect PR review metadata
+        if: github.event_name == 'pull_request'
+        id: review-metadata
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const approved = [...new Set(
+              reviews
+                .filter((review) => review.state === 'APPROVED')
+                .map((review) => review.user.login)
+            )];
+            core.setOutput('author', author);
+            core.setOutput('approvedReviewers', approved.join(','));
+      - name: Validate peer-review advisory gate
+        run: node scripts/ci/validate-peer-review-gate.mjs
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ steps.review-metadata.outputs.author }}
+          APPROVED_REVIEWERS: ${{ steps.review-metadata.outputs.approvedReviewers }}
+
+  cypress-map:
+    name: cypress-map
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix frontend
+      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - name: Wait for frontend
+        run: |
+          for i in {1..45}; do
+            curl -fsS http://127.0.0.1:3001 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Frontend did not become ready"
+          exit 1
+      - run: node scripts/ci/ensure-cypress-tests-found.mjs map
+      - run: node scripts/ci/ensure-cypress-min-scenarios.mjs
+      - run: CYPRESS_GROUP=map node scripts/e2e/run-cypress-group.mjs --group=map
+      - name: Cypress summary
+        if: always()
+        run: |
+          {
+            echo "### cypress-map"
+            echo "- Group: map"
+            echo "- Guard: ensure-cypress-tests-found"
+            echo "- Guard: ensure-cypress-min-scenarios"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cypress artifacts (map)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-map-artifacts
+          path: |
+            cypress/videos/**
+            cypress/screenshots/**
+            frontend-dev.log
+
+  cypress-stops:
+    name: cypress-stops
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix frontend
+      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - name: Wait for frontend
+        run: |
+          for i in {1..45}; do
+            curl -fsS http://127.0.0.1:3001 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Frontend did not become ready"
+          exit 1
+      - run: node scripts/ci/ensure-cypress-tests-found.mjs stops
+      - run: node scripts/ci/ensure-cypress-min-scenarios.mjs
+      - run: CYPRESS_GROUP=stops node scripts/e2e/run-cypress-group.mjs --group=stops
+      - name: Cypress summary
+        if: always()
+        run: |
+          {
+            echo "### cypress-stops"
+            echo "- Group: stops"
+            echo "- Guard: ensure-cypress-tests-found"
+            echo "- Guard: ensure-cypress-min-scenarios"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cypress artifacts (stops)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-stops-artifacts
+          path: |
+            cypress/videos/**
+            cypress/screenshots/**
+            frontend-dev.log
+
+  cypress-routes:
+    name: cypress-routes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix frontend
+      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - name: Wait for frontend
+        run: |
+          for i in {1..45}; do
+            curl -fsS http://127.0.0.1:3001 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Frontend did not become ready"
+          exit 1
+      - run: node scripts/ci/ensure-cypress-tests-found.mjs routes
+      - run: node scripts/ci/ensure-cypress-min-scenarios.mjs
+      - run: CYPRESS_GROUP=routes node scripts/e2e/run-cypress-group.mjs --group=routes
+      - name: Cypress summary
+        if: always()
+        run: |
+          {
+            echo "### cypress-routes"
+            echo "- Group: routes"
+            echo "- Guard: ensure-cypress-tests-found"
+            echo "- Guard: ensure-cypress-min-scenarios"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cypress artifacts (routes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-routes-artifacts
+          path: |
+            cypress/videos/**
+            cypress/screenshots/**
+            frontend-dev.log
+
+  cypress-core-smoke:
+    name: cypress-core-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix frontend
+      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - name: Wait for frontend
+        run: |
+          for i in {1..45}; do
+            curl -fsS http://127.0.0.1:3001 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Frontend did not become ready"
+          exit 1
+      - run: node scripts/ci/ensure-cypress-tests-found.mjs core-smoke
+      - run: node scripts/ci/ensure-cypress-min-scenarios.mjs
+      - run: CYPRESS_GROUP=core-smoke node scripts/e2e/run-cypress-group.mjs --group=core-smoke
+      - name: Cypress summary
+        if: always()
+        run: |
+          {
+            echo "### cypress-core-smoke"
+            echo "- Group: core-smoke"
+            echo "- Guard: ensure-cypress-tests-found"
+            echo "- Guard: ensure-cypress-min-scenarios"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cypress artifacts (core-smoke)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-core-smoke-artifacts
+          path: |
+            cypress/videos/**
+            cypress/screenshots/**
+            frontend-dev.log

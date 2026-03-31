@@ -1,10 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, Interval } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
-import { AgenciesService } from '../agencies/agencies.service.js';
-import { GtfsStaticService } from './gtfs-static.service.js';
-import { GtfsRealtimeService } from './gtfs-realtime.service.js';
-import { REALTIME_POLL_INTERVAL_MS } from '../../common/constants.js';
+import { AgenciesService } from '../agencies/agencies.service';
+import { GtfsStaticService } from './gtfs-static.service';
+import { GtfsRealtimeService } from './gtfs-realtime.service';
+import { REALTIME_POLL_INTERVAL_MS } from '../../common/constants';
 
 @Injectable()
 export class IngestionScheduler implements OnModuleInit {
@@ -22,7 +22,9 @@ export class IngestionScheduler implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const ingestOnStartup = this.configService.get<string>('GTFS_INGEST_ON_STARTUP') === 'true';
     if (!ingestOnStartup) {
-      this.logger.log('Skipping startup GTFS ingestion (set GTFS_INGEST_ON_STARTUP=true to enable)');
+      this.logger.log(
+        'Skipping startup GTFS ingestion (set GTFS_INGEST_ON_STARTUP=true to enable)',
+      );
       return;
     }
     this.logger.log('Running initial GTFS static ingestion on startup');
@@ -33,7 +35,9 @@ export class IngestionScheduler implements OnModuleInit {
   @Cron(process.env['GTFS_STATIC_CRON'] ?? '0 4 * * *')
   async runStaticIngestion(): Promise<void> {
     if (this.isStaticIngestionRunning) {
-      this.logger.warn('Skipping static ingestion tick because a previous run is still in progress');
+      this.logger.warn(
+        'Skipping static ingestion tick because a previous run is still in progress',
+      );
       return;
     }
 

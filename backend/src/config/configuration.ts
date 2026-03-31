@@ -19,9 +19,7 @@ export type AppConfig = z.infer<typeof configSchema>;
 export function validateConfig(config: Record<string, unknown>): AppConfig {
   const result = configSchema.safeParse(config);
   if (!result.success) {
-    const messages = result.error.errors
-      .map((e) => `${e.path.join('.')}: ${e.message}`)
-      .join('\n');
+    const messages = result.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('\n');
     throw new Error(`Configuration validation failed:\n${messages}`);
   }
   return result.data;

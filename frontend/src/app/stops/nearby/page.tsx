@@ -11,7 +11,12 @@ import Alert from '@mui/material/Alert';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
-import { fetchNearbyStops, fetchAlerts, type Stop, type Alert as TransitAlert } from '@/lib/api-client';
+import {
+  fetchNearbyStops,
+  fetchAlerts,
+  type Stop,
+  type Alert as TransitAlert,
+} from '@/lib/api-client';
 import { StopCard } from '@/components/stops/StopCard';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -131,11 +136,7 @@ export default function NearbyStopsPage() {
             inputProps={{ inputMode: 'decimal', 'aria-label': 'Longitude' }}
             sx={{ width: 160 }}
           />
-          <Button
-            variant="contained"
-            startIcon={<MyLocationIcon />}
-            onClick={handleManualSearch}
-          >
+          <Button variant="contained" startIcon={<MyLocationIcon />} onClick={handleManualSearch}>
             Search
           </Button>
         </Box>
@@ -157,7 +158,10 @@ export default function NearbyStopsPage() {
       {loading && <LoadingSkeleton count={5} />}
 
       {!loading && !lat && !useManual && (
-        <EmptyState message="Getting your location…" suggestion="Please allow location access in your browser" />
+        <EmptyState
+          message="Getting your location…"
+          suggestion="Please allow location access in your browser"
+        />
       )}
 
       {!loading && fetchError && (

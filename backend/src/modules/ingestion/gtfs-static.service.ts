@@ -11,7 +11,7 @@ import { Extract } from 'unzipper';
 import csvParser from 'csv-parser';
 import { from as copyFrom } from 'pg-copy-streams';
 import type { Pool, PoolClient } from 'pg';
-import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service.js';
+import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service';
 
 // Escape a value for PostgreSQL COPY CSV format (NULL → empty, strings quoted if needed)
 function csvField(v: string | number | null | undefined): string {
@@ -56,19 +56,27 @@ export class GtfsStaticService {
         this.parseCsv(path.join(extractDir, 'trips.txt')),
         this.parseCsv(path.join(extractDir, 'calendar.txt')),
       ]);
-      this.logger.log(`Parsed: ${routes.length} routes, ${stops.length} stops, ${trips.length} trips, ${calendars.length} calendars`);
+      this.logger.log(
+        `Parsed: ${routes.length} routes, ${stops.length} stops, ${trips.length} trips, ${calendars.length} calendars`,
+      );
 
       // 4. Atomic re-ingestion — shapes.txt (~21MB) and stop_times.txt (~196MB) are streamed
       this.logger.debug(`Starting atomic re-ingestion transaction...`);
       await this.atomicReingest(agencyConfig, {
-        routes, stops, trips, calendars,
+        routes,
+        stops,
+        trips,
+        calendars,
         shapesPath: path.join(extractDir, 'shapes.txt'),
         stopTimesPath: path.join(extractDir, 'stop_times.txt'),
       });
 
       this.logger.log(`✓ Ingestion complete for agency: ${agencyConfig.key}`);
     } catch (err) {
-      this.logger.error(`Static ingestion failed for agency "${agencyConfig.key}": ${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err.stack : undefined);
+      this.logger.error(
+        `Static ingestion failed for agency "${agencyConfig.key}": ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
       throw err;
     } finally {
       // Clean up temp files
@@ -159,7 +167,9 @@ export class GtfsStaticService {
   ): Promise<void> {
     if (!fs.existsSync(filePath)) return;
     let batch: Record<string, string>[] = [];
-    for await (const row of fs.createReadStream(filePath).pipe(csvParser()) as AsyncIterable<Record<string, string>>) {
+    for await (const row of fs.createReadStream(filePath).pipe(csvParser()) as AsyncIterable<
+      Record<string, string>
+    >) {
       batch.push(row);
       if (batch.length >= batchSize) {
         await handler(batch);
@@ -232,10 +242,21 @@ export class GtfsStaticService {
       const values: unknown[] = [];
       const rows = batch.map((row, idx) => {
         const b = idx * 7;
-        values.push(agencyId, row['route_id'], row['route_short_name'] ?? null, row['route_long_name'] ?? null, parseInt(row['route_type'] ?? '3', 10), row['route_color'] ?? null, row['route_text_color'] ?? null);
-        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7})`;
+        values.push(
+          agencyId,
+          row['route_id'],
+          row['route_short_name'] ?? null,
+          row['route_long_name'] ?? null,
+          parseInt(row['route_type'] ?? '3', 10),
+          row['route_color'] ?? null,
+          row['route_text_color'] ?? null,
+        );
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7})`;
       });
-      await q(`INSERT INTO routes (agency_id,route_id,short_name,long_name,route_type,color,text_color) VALUES ${rows.join(',')}`, values);
+      await q(
+        `INSERT INTO routes (agency_id,route_id,short_name,long_name,route_type,color,text_color) VALUES ${rows.join(',')}`,
+        values,
+      );
     }
     this.logger.log(`✓ Routes inserted: ${routes.length}`);
 
@@ -247,10 +268,22 @@ export class GtfsStaticService {
       const values: unknown[] = [];
       const rows = batch.map((row, idx) => {
         const b = idx * 8;
-        values.push(agencyId, row['stop_id'], row['stop_name'], row['stop_code'] ?? null, parseFloat(row['stop_lat'] ?? '0'), parseFloat(row['stop_lon'] ?? '0'), row['parent_station'] ?? null, row['wheelchair_boarding'] ? parseInt(row['wheelchair_boarding'], 10) : null);
-        return `($${b+1},$${b+2},$${b+3},$${b+4},ST_SetSRID(ST_MakePoint($${b+6},$${b+5}),4326),$${b+7},$${b+8})`;
+        values.push(
+          agencyId,
+          row['stop_id'],
+          row['stop_name'],
+          row['stop_code'] ?? null,
+          parseFloat(row['stop_lat'] ?? '0'),
+          parseFloat(row['stop_lon'] ?? '0'),
+          row['parent_station'] ?? null,
+          row['wheelchair_boarding'] ? parseInt(row['wheelchair_boarding'], 10) : null,
+        );
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},ST_SetSRID(ST_MakePoint($${b + 6},$${b + 5}),4326),$${b + 7},$${b + 8})`;
       });
-      await q(`INSERT INTO stops (agency_id,stop_id,stop_name,stop_code,location,parent_station_id,wheelchair_boarding) VALUES ${rows.join(',')}`, values);
+      await q(
+        `INSERT INTO stops (agency_id,stop_id,stop_name,stop_code,location,parent_station_id,wheelchair_boarding) VALUES ${rows.join(',')}`,
+        values,
+      );
     }
     this.logger.log(`✓ Stops inserted: ${stops.length}`);
 
@@ -263,10 +296,22 @@ export class GtfsStaticService {
       const values: unknown[] = [];
       const rows = batch.map((row, idx) => {
         const b = idx * 8;
-        values.push(agencyId, row['trip_id'], row['route_id'], row['service_id'], row['trip_headsign'] ?? null, row['direction_id'] ? parseInt(row['direction_id'], 10) : null, row['shape_id'] ?? null, row['wheelchair_accessible'] ? parseInt(row['wheelchair_accessible'], 10) : null);
-        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8})`;
+        values.push(
+          agencyId,
+          row['trip_id'],
+          row['route_id'],
+          row['service_id'],
+          row['trip_headsign'] ?? null,
+          row['direction_id'] ? parseInt(row['direction_id'], 10) : null,
+          row['shape_id'] ?? null,
+          row['wheelchair_accessible'] ? parseInt(row['wheelchair_accessible'], 10) : null,
+        );
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`;
       });
-      await q(`INSERT INTO trips (agency_id,trip_id,route_id,service_id,trip_headsign,direction_id,shape_id,wheelchair_accessible) VALUES ${rows.join(',')}`, values);
+      await q(
+        `INSERT INTO trips (agency_id,trip_id,route_id,service_id,trip_headsign,direction_id,shape_id,wheelchair_accessible) VALUES ${rows.join(',')}`,
+        values,
+      );
     }
     this.logger.log(`✓ Trips inserted: ${trips.length}`);
 
@@ -281,16 +326,33 @@ export class GtfsStaticService {
     this.logger.log(`✓ Stop times inserted (via COPY)`);
 
     // 8. Insert service calendars — 11 params per row
-    this.logger.debug(`Inserting ${data.calendars.length} service calendars in batches of ${BATCH}...`);
+    this.logger.debug(
+      `Inserting ${data.calendars.length} service calendars in batches of ${BATCH}...`,
+    );
     for (let i = 0; i < data.calendars.length; i += BATCH) {
       const batch = data.calendars.slice(i, i + BATCH);
       const values: unknown[] = [];
       const rows = batch.map((row, idx) => {
         const b = idx * 11;
-        values.push(agencyId, row['service_id'], row['monday'] === '1', row['tuesday'] === '1', row['wednesday'] === '1', row['thursday'] === '1', row['friday'] === '1', row['saturday'] === '1', row['sunday'] === '1', row['start_date'], row['end_date']);
-        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11})`;
+        values.push(
+          agencyId,
+          row['service_id'],
+          row['monday'] === '1',
+          row['tuesday'] === '1',
+          row['wednesday'] === '1',
+          row['thursday'] === '1',
+          row['friday'] === '1',
+          row['saturday'] === '1',
+          row['sunday'] === '1',
+          row['start_date'],
+          row['end_date'],
+        );
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11})`;
       });
-      await q(`INSERT INTO service_calendars (agency_id,service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date) VALUES ${rows.join(',')}`, values);
+      await q(
+        `INSERT INTO service_calendars (agency_id,service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date) VALUES ${rows.join(',')}`,
+        values,
+      );
     }
     this.logger.log(`✓ Service calendars inserted: ${data.calendars.length}`);
 
@@ -298,7 +360,6 @@ export class GtfsStaticService {
     this.logger.debug(`Marking agency as ingested...`);
     await q(`UPDATE agencies SET last_ingested_at = NOW() WHERE "agencyId" = $1`, [agencyId]);
     this.logger.log(`✓ Agency marked as ingested`);
-
   }
 
   // --- COPY FROM STDIN helpers (used for large tables to avoid OOM) --------
@@ -339,7 +400,9 @@ export class GtfsStaticService {
           finalize(err);
         };
         const onClientError = (err: Error): void => {
-          this.logger.error(`copyShapes database connection error after ${shapeRowCount} rows: ${err.message}`);
+          this.logger.error(
+            `copyShapes database connection error after ${shapeRowCount} rows: ${err.message}`,
+          );
           readStream.destroy(err);
           finalize(err);
         };
@@ -396,7 +459,7 @@ export class GtfsStaticService {
       let stopTimesRowCount = 0;
       let streamEnded = false;
       const startTime = Date.now();
-      
+
       await new Promise<void>((resolve, reject) => {
         const copyStream = pgClient.query(
           copyFrom(
@@ -426,7 +489,9 @@ export class GtfsStaticService {
 
         const onStreamError = (err: Error): void => {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          this.logger.error(`copyStopTimes error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`);
+          this.logger.error(
+            `copyStopTimes error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`,
+          );
           copyStream.destroy(err);
           readStream.destroy(err);
           finalize(err);
@@ -434,7 +499,9 @@ export class GtfsStaticService {
 
         const onClientError = (err: Error): void => {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          this.logger.error(`copyStopTimes database connection error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`);
+          this.logger.error(
+            `copyStopTimes database connection error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`,
+          );
           readStream.destroy(err);
           finalize(err);
         };
@@ -445,7 +512,9 @@ export class GtfsStaticService {
             return;
           }
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          this.logger.error(`copyStopTimes stream error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`);
+          this.logger.error(
+            `copyStopTimes stream error after ${stopTimesRowCount} rows (~${elapsed}s): ${err.message}`,
+          );
           readStream.destroy(err);
           finalize(err);
         };
@@ -473,7 +542,7 @@ export class GtfsStaticService {
         copyStream.on('error', onCopyError);
         copyStream.on('finish', onFinish);
         copyStream.on('close', onClose);
-        
+
         csvStream.on('data', (row: Record<string, string>) => {
           stopTimesRowCount++;
           if (stopTimesRowCount % 100_000 === 0) {
@@ -481,17 +550,18 @@ export class GtfsStaticService {
             this.logger.log(`copyStopTimes progress: ${stopTimesRowCount} rows (~${elapsed}s)`);
           }
           // GTFS times like "25:30:00" are valid PostgreSQL interval literals — no conversion needed
-          const line = [
-            agencyId,
-            csvField(row['trip_id']),
-            csvField(row['stop_id']),
-            row['stop_sequence'] ?? '0',
-            row['arrival_time'] ?? '',
-            row['departure_time'] ?? '',
-            csvField(row['stop_headsign'] ?? null),
-            row['pickup_type'] ?? '',
-            row['drop_off_type'] ?? '',
-          ].join(',') + '\n';
+          const line =
+            [
+              agencyId,
+              csvField(row['trip_id']),
+              csvField(row['stop_id']),
+              row['stop_sequence'] ?? '0',
+              row['arrival_time'] ?? '',
+              row['departure_time'] ?? '',
+              csvField(row['stop_headsign'] ?? null),
+              row['pickup_type'] ?? '',
+              row['drop_off_type'] ?? '',
+            ].join(',') + '\n';
           if (!copyStream.write(line)) {
             csvStream.pause();
             if (!waitingForDrain) {
@@ -503,18 +573,24 @@ export class GtfsStaticService {
             }
           }
         });
-        
+
         csvStream.on('end', () => {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          this.logger.debug(`copyStopTimes CSV stream ended at ${stopTimesRowCount} rows (~${elapsed}s), waiting for COPY to finish...`);
+          this.logger.debug(
+            `copyStopTimes CSV stream ended at ${stopTimesRowCount} rows (~${elapsed}s), waiting for COPY to finish...`,
+          );
           streamEnded = true;
           copyStream.end();
           copyFinishTimeout = setTimeout(() => {
             if (settled) return;
-            finalize(new Error(`copyStopTimes timed out waiting for COPY to finish after streaming ${stopTimesRowCount} rows`));
+            finalize(
+              new Error(
+                `copyStopTimes timed out waiting for COPY to finish after streaming ${stopTimesRowCount} rows`,
+              ),
+            );
           }, 300_000);
         });
-        
+
         csvStream.on('error', onStreamError);
       });
     } finally {

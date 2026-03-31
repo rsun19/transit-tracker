@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   Unique,
 } from 'typeorm';
-import { Agency } from '../../agencies/entities/agency.entity.js';
+import { Agency } from '../../agencies/entities/agency.entity';
 
 @Entity('routes')
 @Unique(['agencyId', 'routeId'])

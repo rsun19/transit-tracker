@@ -8,11 +8,11 @@ This guide gets the full application stack running locally from a clean machine 
 
 ## Prerequisites
 
-| Tool | Minimum Version | Install |
-|------|----------------|---------|
-| Docker Desktop | 25.x | https://docs.docker.com/get-docker/ |
-| Docker Compose | v2.x (plugin) | Included with Docker Desktop |
-| Git | any | https://git-scm.com |
+| Tool           | Minimum Version | Install                             |
+| -------------- | --------------- | ----------------------------------- |
+| Docker Desktop | 25.x            | https://docs.docker.com/get-docker/ |
+| Docker Compose | v2.x (plugin)   | Included with Docker Desktop        |
+| Git            | any             | https://git-scm.com                 |
 
 No language runtimes (Node.js, Python, etc.) need to be installed on the host — everything runs inside containers.
 
@@ -84,13 +84,13 @@ First startup takes **3–5 minutes** (image builds + database initialization + 
 
 Once all containers are healthy:
 
-| URL | Description |
-|-----|-------------|
-| `http://localhost` | Frontend application |
-| `http://localhost/api/v1/agencies` | Backend API — lists ingested agencies |
-| `http://localhost/api/v1/routes?agencyKey=mbta` | MBTA routes |
-| `http://localhost/api/v1/vehicles/live?agencyKey=mbta` | Live vehicle positions |
-| `http://localhost/health` | NGINX health check |
+| URL                                                    | Description                           |
+| ------------------------------------------------------ | ------------------------------------- |
+| `http://localhost`                                     | Frontend application                  |
+| `http://localhost/api/v1/agencies`                     | Backend API — lists ingested agencies |
+| `http://localhost/api/v1/routes?agencyKey=mbta`        | MBTA routes                           |
+| `http://localhost/api/v1/vehicles/live?agencyKey=mbta` | Live vehicle positions                |
+| `http://localhost/health`                              | NGINX health check                    |
 
 Quick smoke test:
 
@@ -170,12 +170,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 This mounts source directories as volumes so code changes reload without rebuilding images.
 
-| Service | Dev URL | Hot reload |
-|---------|---------|-----------|
+| Service  | Dev URL                 | Hot reload                 |
+| -------- | ----------------------- | -------------------------- |
 | Frontend | `http://localhost:3001` | Yes (Next.js fast refresh) |
-| Backend | `http://localhost:3000` | Yes (NestJS watch mode) |
-| Postgres | `localhost:5432` | N/A |
-| Redis | `localhost:6379` | N/A |
+| Backend  | `http://localhost:3000` | Yes (NestJS watch mode)    |
+| Postgres | `localhost:5432`        | N/A                        |
+| Redis    | `localhost:6379`        | N/A                        |
 
 ---
 
@@ -216,10 +216,10 @@ docker compose up --build
 
 ## Troubleshooting
 
-| Symptom | Likely Cause | Fix |
-|---------|-------------|-----|
-| `transit-backend` exits with `ECONNREFUSED` | Postgres not ready | Wait 30 s; health check retries automatically |
-| `transit-worker` logs "feed download failed" | Invalid GTFS URL or missing API key | Check `.env`; verify URL is reachable from container |
-| Frontend shows "No data available yet" | Ingestion hasn't completed | Wait for worker to finish (check `docker compose logs worker`) |
-| HTTP 429 from API | Rate limit hit | Slow down requests; limit is 60/min per IP |
-| Map shows no vehicle markers | Realtime feed off or agency has no realtime URL | Check `config/agencies.json` for `gtfsRealtimeUrl`; check worker logs |
+| Symptom                                      | Likely Cause                                    | Fix                                                                   |
+| -------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
+| `transit-backend` exits with `ECONNREFUSED`  | Postgres not ready                              | Wait 30 s; health check retries automatically                         |
+| `transit-worker` logs "feed download failed" | Invalid GTFS URL or missing API key             | Check `.env`; verify URL is reachable from container                  |
+| Frontend shows "No data available yet"       | Ingestion hasn't completed                      | Wait for worker to finish (check `docker compose logs worker`)        |
+| HTTP 429 from API                            | Rate limit hit                                  | Slow down requests; limit is 60/min per IP                            |
+| Map shows no vehicle markers                 | Realtime feed off or agency has no realtime URL | Check `config/agencies.json` for `gtfsRealtimeUrl`; check worker logs |

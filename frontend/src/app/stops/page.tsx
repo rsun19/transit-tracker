@@ -103,9 +103,7 @@ export default function StopsPage() {
           {stops.map((stop) => (
             <ListItem key={stop.stopId} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
-                onClick={() =>
-                  router.push(`/stops/${encodeURIComponent(stop.stopId)}`)
-                }
+                onClick={() => router.push(`/stops/${encodeURIComponent(stop.stopId)}`)}
                 sx={{ borderRadius: 1, border: '1px solid', borderColor: 'divider' }}
               >
                 <ListItemText

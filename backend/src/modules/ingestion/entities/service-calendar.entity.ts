@@ -1,5 +1,5 @@
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from 'typeorm';
-import { Agency } from '../../agencies/entities/agency.entity.js';
+import { Agency } from '../../agencies/entities/agency.entity';
 
 @Entity('service_calendars')
 @Unique(['agencyId', 'serviceId'])

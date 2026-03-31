@@ -123,7 +123,9 @@ export function fetchRoutes(params?: {
 }
 
 export function fetchRoute(routeId: string, agencyKey: string): Promise<Route> {
-  return apiFetch<Route>(`/routes/${encodeURIComponent(routeId)}?agencyKey=${encodeURIComponent(agencyKey)}`);
+  return apiFetch<Route>(
+    `/routes/${encodeURIComponent(routeId)}?agencyKey=${encodeURIComponent(agencyKey)}`,
+  );
 }
 
 export function fetchStops(params?: {
@@ -156,15 +158,23 @@ export function fetchStopDepartures(
 export function fetchStopRoutes(
   stopId: string,
   agencyKey: string,
-): Promise<{ data: { routeId: string; shortName: string | null; longName: string | null; routeType: number }[] }> {
-  return apiFetch(`/stops/${encodeURIComponent(stopId)}/routes?agencyKey=${encodeURIComponent(agencyKey)}`);
+): Promise<{
+  data: { routeId: string; shortName: string | null; longName: string | null; routeType: number }[];
+}> {
+  return apiFetch(
+    `/stops/${encodeURIComponent(stopId)}/routes?agencyKey=${encodeURIComponent(agencyKey)}`,
+  );
 }
 
 export function fetchTrip(tripId: string, agencyKey: string): Promise<Trip> {
-  return apiFetch<Trip>(`/trips/${encodeURIComponent(tripId)}?agencyKey=${encodeURIComponent(agencyKey)}`);
+  return apiFetch<Trip>(
+    `/trips/${encodeURIComponent(tripId)}?agencyKey=${encodeURIComponent(agencyKey)}`,
+  );
 }
 
-export function fetchVehicles(agencyKey?: string): Promise<{ data: { agencyKey: string; vehicles: Vehicle[] }[] }> {
+export function fetchVehicles(
+  agencyKey?: string,
+): Promise<{ data: { agencyKey: string; vehicles: Vehicle[] }[] }> {
   const qs = agencyKey ? `?agencyKey=${encodeURIComponent(agencyKey)}` : '';
   return apiFetch(`/vehicles/live${qs}`);
 }

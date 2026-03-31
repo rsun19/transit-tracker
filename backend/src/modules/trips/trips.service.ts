@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { CacheService } from '../cache/cache.service.js';
-import { API_CACHE_ROUTES_TTL_S } from '../../common/constants.js';
+import { CacheService } from '../cache/cache.service';
+import { API_CACHE_ROUTES_TTL_S } from '../../common/constants';
 
 export interface TripStopResponse {
   sequence: number;
@@ -34,19 +34,21 @@ export class TripsService {
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as TripDetailResponse;
 
-    const rows = await this.dataSource.query<Array<{
-      trip_id: string;
-      route_id: string;
-      trip_headsign: string | null;
-      stop_sequence: number;
-      stop_id_gtfs: string;
-      stop_name: string;
-      stop_code: string | null;
-      lat: number;
-      lon: number;
-      arrival_time: string | null;
-      departure_time: string | null;
-    }>>(
+    const rows = await this.dataSource.query<
+      Array<{
+        trip_id: string;
+        route_id: string;
+        trip_headsign: string | null;
+        stop_sequence: number;
+        stop_id_gtfs: string;
+        stop_name: string;
+        stop_code: string | null;
+        lat: number;
+        lon: number;
+        arrival_time: string | null;
+        departure_time: string | null;
+      }>
+    >(
       `SELECT t.trip_id, t.route_id, t.trip_headsign,
               st.stop_sequence,
               s.stop_id AS stop_id_gtfs,

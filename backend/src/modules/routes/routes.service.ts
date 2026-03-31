@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Route } from './entities/route.entity.js';
-import { Shape } from '../ingestion/entities/shape.entity.js';
-import { CacheService } from '../cache/cache.service.js';
-import { API_CACHE_ROUTES_TTL_S, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../common/constants.js';
+import { Route } from './entities/route.entity';
+import { Shape } from '../ingestion/entities/shape.entity';
+import { CacheService } from '../cache/cache.service';
+import {
+  API_CACHE_ROUTES_TTL_S,
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+} from '../../common/constants';
 
 export interface GeoJsonLineString {
   type: 'LineString';
@@ -54,12 +58,11 @@ export class RoutesService {
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as { data: RouteResponse[]; total: number };
 
-    const qb = this.routeRepo
-      .createQueryBuilder('r')
-      .leftJoin('r.agency', 'a');
+    const qb = this.routeRepo.createQueryBuilder('r').leftJoin('r.agency', 'a');
 
     if (params.agencyKey) qb.andWhere('a.agency_key = :agencyKey', { agencyKey: params.agencyKey });
-    if (params.routeType !== undefined) qb.andWhere('r.route_type = :routeType', { routeType: params.routeType });
+    if (params.routeType !== undefined)
+      qb.andWhere('r.route_type = :routeType', { routeType: params.routeType });
     if (params.q) {
       qb.andWhere('(r.short_name ILIKE :q OR r.long_name ILIKE :q)', { q: `%${params.q}%` });
     }
@@ -94,7 +97,9 @@ export class RoutesService {
 
     // Resolve one representative shape_id for the route first.
     // Avoiding a correlated subquery here prevents very slow scans on large shape/trip tables.
-    const tripRows = await this.routeRepo.query<Array<{ trip_id: string; shape_id: string | null }>>(
+    const tripRows = await this.routeRepo.query<
+      Array<{ trip_id: string; shape_id: string | null }>
+    >(
       `SELECT t.trip_id, t.shape_id
        FROM trips t
        JOIN agencies a ON a."agencyId" = t.agency_id
@@ -166,8 +171,8 @@ export class RoutesService {
 
         const match = String(location).match(/POINT\(([^ ]+) ([^ )]+)\)/);
         return match
-          ? [parseFloat(match[1]), parseFloat(match[2])] as [number, number]
-          : [0, 0] as [number, number];
+          ? ([parseFloat(match[1]), parseFloat(match[2])] as [number, number])
+          : ([0, 0] as [number, number]);
       });
       shape = { type: 'LineString', coordinates: coords };
     }

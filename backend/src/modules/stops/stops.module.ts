@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Stop } from './entities/stop.entity.js';
-import { StopTime } from './entities/stop-time.entity.js';
-import { Trip } from '../trips/entities/trip.entity.js';
-import { Route } from '../routes/entities/route.entity.js';
-import { StopsService } from './stops.service.js';
-import { StopsController } from './stops.controller.js';
-import { CacheModule } from '../cache/cache.module.js';
+import { Stop } from './entities/stop.entity';
+import { StopTime } from './entities/stop-time.entity';
+import { Trip } from '../trips/entities/trip.entity';
+import { Route } from '../routes/entities/route.entity';
+import { StopsService } from './stops.service';
+import { StopsController } from './stops.controller';
+import { CacheModule } from '../cache/cache.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Stop, StopTime, Trip, Route]), CacheModule],
