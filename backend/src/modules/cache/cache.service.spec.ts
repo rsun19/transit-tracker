@@ -60,9 +60,7 @@ describe('CacheService', () => {
     it('emits a WARN log when set fails', async () => {
       mockRedis.set.mockRejectedValue(connectionError);
       await service.set('k', 'v', 30);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Cache set failed for key "k"'),
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cache set failed for key "k"'));
     });
   });
 
@@ -75,9 +73,7 @@ describe('CacheService', () => {
     it('emits a WARN log when del fails', async () => {
       mockRedis.del.mockRejectedValue(connectionError);
       await service.del('k');
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Cache del failed for key "k"'),
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cache del failed for key "k"'));
     });
   });
 

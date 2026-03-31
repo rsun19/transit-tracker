@@ -16,6 +16,7 @@
 Backend liveness probe. Used by Docker Compose health check.
 
 **Response 200**:
+
 ```json
 { "status": "ok", "uptime": 12345 }
 ```
@@ -30,13 +31,14 @@ List all routes across all ingested agencies, optionally filtered.
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agencyKey` | string | No | Filter by agency slug (e.g. `mbta`) |
-| `routeType` | integer | No | GTFS route_type (0=tram, 1=subway, 2=rail, 3=bus, 4=ferry) |
-| `q` | string | No | Free-text search on `short_name` or `long_name` |
+| Param       | Type    | Required | Description                                                |
+| ----------- | ------- | -------- | ---------------------------------------------------------- |
+| `agencyKey` | string  | No       | Filter by agency slug (e.g. `mbta`)                        |
+| `routeType` | integer | No       | GTFS route_type (0=tram, 1=subway, 2=rail, 3=bus, 4=ferry) |
+| `q`         | string  | No       | Free-text search on `short_name` or `long_name`            |
 
 **Response 200**:
+
 ```json
 {
   "data": [
@@ -67,11 +69,12 @@ Returns a single route with its stop list and shape GeoJSON.
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agencyKey` | string | Yes | Required to disambiguate same route_id across agencies |
+| Param       | Type   | Required | Description                                            |
+| ----------- | ------ | -------- | ------------------------------------------------------ |
+| `agencyKey` | string | Yes      | Required to disambiguate same route_id across agencies |
 
 **Response 200**:
+
 ```json
 {
   "id": "uuid",
@@ -93,7 +96,10 @@ Returns a single route with its stop list and shape GeoJSON.
   ],
   "shape": {
     "type": "LineString",
-    "coordinates": [[-71.1425, 42.3954], [-71.1198, 42.3733]]
+    "coordinates": [
+      [-71.1425, 42.3954],
+      [-71.1198, 42.3733]
+    ]
   }
 }
 ```
@@ -111,13 +117,14 @@ Search stops by name or code, optionally filtered by agency.
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `q` | string | Yes | Search term (≥ 2 chars) — matched against `stop_name` and `stop_code` |
-| `agencyKey` | string | No | Filter by agency |
-| `limit` | integer | No | Max results to return (default: 20, max: 100) |
+| Param       | Type    | Required | Description                                                           |
+| ----------- | ------- | -------- | --------------------------------------------------------------------- |
+| `q`         | string  | Yes      | Search term (≥ 2 chars) — matched against `stop_name` and `stop_code` |
+| `agencyKey` | string  | No       | Filter by agency                                                      |
+| `limit`     | integer | No       | Max results to return (default: 20, max: 100)                         |
 
 **Response 200**:
+
 ```json
 {
   "data": [
@@ -145,15 +152,16 @@ Returns stops within a radius sorted by distance.
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `lat` | float | Yes | Latitude (-90..90) |
-| `lon` | float | Yes | Longitude (-180..180) |
-| `radius` | integer | No | Search radius in metres (default: 500, max: 5000) |
-| `agencyKey` | string | No | Restrict to one agency |
-| `limit` | integer | No | Max stops to return (default: 20, max: 50) |
+| Param       | Type    | Required | Description                                       |
+| ----------- | ------- | -------- | ------------------------------------------------- |
+| `lat`       | float   | Yes      | Latitude (-90..90)                                |
+| `lon`       | float   | Yes      | Longitude (-180..180)                             |
+| `radius`    | integer | No       | Search radius in metres (default: 500, max: 5000) |
+| `agencyKey` | string  | No       | Restrict to one agency                            |
+| `limit`     | integer | No       | Max stops to return (default: 20, max: 50)        |
 
 **Response 200**:
+
 ```json
 {
   "data": [
@@ -173,6 +181,7 @@ Returns stops within a radius sorted by distance.
 ```
 
 **Errors**:
+
 - `400` if `lat` or `lon` is missing or out of range
 - `400` if `radius` exceeds 5000
 
@@ -188,13 +197,14 @@ Scheduled departures for a stop for the current service day, optionally augmente
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agencyKey` | string | Yes | Agency owning this stop |
-| `limit` | integer | No | Max departures (default: 20, max: 100) |
-| `after` | string | No | ISO 8601 time (HH:MM); return departures after this time (default: current time) |
+| Param       | Type    | Required | Description                                                                      |
+| ----------- | ------- | -------- | -------------------------------------------------------------------------------- |
+| `agencyKey` | string  | Yes      | Agency owning this stop                                                          |
+| `limit`     | integer | No       | Max departures (default: 20, max: 100)                                           |
+| `after`     | string  | No       | ISO 8601 time (HH:MM); return departures after this time (default: current time) |
 
 **Response 200**:
+
 ```json
 {
   "stopId": "place-alfcl",
@@ -229,6 +239,7 @@ All routes serving a stop.
 **Query parameters**: `agencyKey` (required)
 
 **Response 200**:
+
 ```json
 {
   "stopId": "place-alfcl",
@@ -255,11 +266,12 @@ Returns current vehicle positions for all agencies (or one), sourced from Redis.
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agencyKey` | string | No | Filter to one agency |
+| Param       | Type   | Required | Description          |
+| ----------- | ------ | -------- | -------------------- |
+| `agencyKey` | string | No       | Filter to one agency |
 
 **Response 200**:
+
 ```json
 {
   "generatedAt": "2026-03-28T14:31:58Z",
@@ -280,6 +292,7 @@ Returns current vehicle positions for all agencies (or one), sourced from Redis.
 ```
 
 **When Redis is unavailable**: returns `503` with:
+
 ```json
 { "error": "Live tracking temporarily unavailable", "statusCode": 503 }
 ```
@@ -298,6 +311,7 @@ Returns trip detail including its ordered stop sequence.
 **Query parameters**: `agencyKey` (required)
 
 **Response 200**:
+
 ```json
 {
   "tripId": "63885441",
@@ -330,13 +344,14 @@ Active service alerts sourced from Redis (from GTFS-RT Alerts feed).
 
 **Query parameters**:
 
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agencyKey` | string | No | Filter by agency |
-| `routeId` | string | No | Filter alerts affecting a specific route |
-| `stopId` | string | No | Filter alerts affecting a specific stop |
+| Param       | Type   | Required | Description                              |
+| ----------- | ------ | -------- | ---------------------------------------- |
+| `agencyKey` | string | No       | Filter by agency                         |
+| `routeId`   | string | No       | Filter alerts affecting a specific route |
+| `stopId`    | string | No       | Filter alerts affecting a specific stop  |
 
 **Response 200**:
+
 ```json
 {
   "generatedAt": "2026-03-28T14:31:58Z",
@@ -370,6 +385,7 @@ Active service alerts sourced from Redis (from GTFS-RT Alerts feed).
 Returns all configured and ingested agencies.
 
 **Response 200**:
+
 ```json
 {
   "data": [
@@ -393,6 +409,7 @@ Returns all configured and ingested agencies.
 Next.js Route Handler used by Docker Compose health check for the frontend container.
 
 **Response 200**:
+
 ```json
 { "status": "ok" }
 ```
@@ -410,10 +427,10 @@ All non-2xx responses use:
 }
 ```
 
-| Status | Meaning |
-|--------|---------|
-| 400 | Invalid or missing query parameters |
-| 404 | Resource not found |
-| 429 | Rate limit exceeded (60 req/min per IP) |
-| 503 | Upstream dependency unavailable (Redis down, etc.) |
-| 500 | Unexpected server error |
+| Status | Meaning                                            |
+| ------ | -------------------------------------------------- |
+| 400    | Invalid or missing query parameters                |
+| 404    | Resource not found                                 |
+| 429    | Rate limit exceeded (60 req/min per IP)            |
+| 503    | Upstream dependency unavailable (Redis down, etc.) |
+| 500    | Unexpected server error                            |

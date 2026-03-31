@@ -22,7 +22,7 @@ const DEFAULT_AGENCY = 'mbta';
 export default function RouteDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const routeId = decodeURIComponent(params?.routeId as string ?? '');
+  const routeId = decodeURIComponent((params?.routeId as string) ?? '');
 
   const [route, setRoute] = useState<Route | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -55,12 +55,13 @@ export default function RouteDetailPage() {
 
       {loading && <LoadingSkeleton count={8} />}
 
-      {!loading && error && (
-        <EmptyState message="Could not load route" suggestion={error} />
-      )}
+      {!loading && error && <EmptyState message="Could not load route" suggestion={error} />}
 
       {!loading && !error && !route && (
-        <EmptyState message="Route not found" suggestion="The route may have been removed or the ID is incorrect" />
+        <EmptyState
+          message="Route not found"
+          suggestion="The route may have been removed or the ID is incorrect"
+        />
       )}
 
       {!loading && !error && route && (
@@ -80,7 +81,8 @@ export default function RouteDetailPage() {
 
           <Box sx={{ mb: 3 }}>
             <Typography variant="h5" fontWeight={700}>
-              {route.shortName && `${route.shortName} — `}{route.longName}
+              {route.shortName && `${route.shortName} — `}
+              {route.longName}
             </Typography>
           </Box>
 
@@ -88,11 +90,14 @@ export default function RouteDetailPage() {
             Stops
           </Typography>
 
-          {(route as Route & { stops?: { stopId: string; stopName: string }[] }).stops?.length === 0 ? (
+          {(route as Route & { stops?: { stopId: string; stopName: string }[] }).stops?.length ===
+          0 ? (
             <EmptyState message="No stops found for this route" />
           ) : (
             <List disablePadding>
-              {((route as Route & { stops?: { stopId: string; stopName: string }[] }).stops ?? []).map((stop) => (
+              {(
+                (route as Route & { stops?: { stopId: string; stopName: string }[] }).stops ?? []
+              ).map((stop) => (
                 <ListItem key={stop.stopId} disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
                     onClick={() => router.push(`/stops/${encodeURIComponent(stop.stopId)}`)}

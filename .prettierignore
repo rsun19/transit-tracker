@@ -5,3 +5,10 @@ coverage/
 .next/
 out/
 *.min.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+backend/dist/
+backend/coverage/
+frontend/coverage/
+.specify/

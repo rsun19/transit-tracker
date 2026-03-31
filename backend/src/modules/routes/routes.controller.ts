@@ -1,11 +1,5 @@
-import {
-  Controller,
-  Get,
-  NotFoundException,
-  Param,
-  Query,
-} from '@nestjs/common';
-import { RoutesService } from './routes.service.js';
+import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
+import { RoutesService } from './routes.service';
 
 @Controller('api/v1/routes')
 export class RoutesController {
@@ -26,10 +20,7 @@ export class RoutesController {
   }
 
   @Get(':routeId')
-  async findOne(
-    @Param('routeId') routeId: string,
-    @Query('agencyKey') agencyKey?: string,
-  ) {
+  async findOne(@Param('routeId') routeId: string, @Query('agencyKey') agencyKey?: string) {
     if (!agencyKey) {
       throw new NotFoundException('agencyKey query param is required');
     }

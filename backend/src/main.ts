@@ -1,30 +1,56 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: {
       log: (message: string, context?: string) =>
         process.stdout.write(
-          JSON.stringify({ timestamp: new Date().toISOString(), level: 'log', service: context ?? 'App', message }) + '\n',
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'log',
+            service: context ?? 'App',
+            message,
+          }) + '\n',
         ),
       error: (message: string, trace?: string, context?: string) =>
         process.stdout.write(
-          JSON.stringify({ timestamp: new Date().toISOString(), level: 'error', service: context ?? 'App', message, trace }) + '\n',
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'error',
+            service: context ?? 'App',
+            message,
+            trace,
+          }) + '\n',
         ),
       warn: (message: string, context?: string) =>
         process.stdout.write(
-          JSON.stringify({ timestamp: new Date().toISOString(), level: 'warn', service: context ?? 'App', message }) + '\n',
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'warn',
+            service: context ?? 'App',
+            message,
+          }) + '\n',
         ),
       debug: (message: string, context?: string) =>
         process.stdout.write(
-          JSON.stringify({ timestamp: new Date().toISOString(), level: 'debug', service: context ?? 'App', message }) + '\n',
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'debug',
+            service: context ?? 'App',
+            message,
+          }) + '\n',
         ),
       verbose: (message: string, context?: string) =>
         process.stdout.write(
-          JSON.stringify({ timestamp: new Date().toISOString(), level: 'verbose', service: context ?? 'App', message }) + '\n',
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'verbose',
+            service: context ?? 'App',
+            message,
+          }) + '\n',
         ),
     },
   });

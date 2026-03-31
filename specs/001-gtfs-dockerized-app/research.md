@@ -19,8 +19,8 @@ import { transit_realtime } from '@googletag/gtfs-realtime-bindings';
 
 const feed = transit_realtime.FeedMessage.decode(binaryBuffer);
 const vehiclePositions = feed.entity
-  .filter(e => e.vehicle?.position)
-  .map(e => ({
+  .filter((e) => e.vehicle?.position)
+  .map((e) => ({
     vehicleId: e.id,
     lat: e.vehicle.position.latitude,
     lon: e.vehicle.position.longitude,
@@ -31,6 +31,7 @@ const vehiclePositions = feed.entity
 ```
 
 **Alternatives considered**:
+
 - `protobufjs` direct: requires manual proto file compilation; unnecessary complexity
 - `gtfs-realtime-bindings` (unscoped): deprecated third-party package; will break on spec updates
 - Manual binary parsing: no type safety; unmaintainable
@@ -68,6 +69,7 @@ LIMIT 20;
 Note: `ST_Point(lon, lat)` — PostGIS takes X (longitude) first, then Y (latitude).
 
 **Alternatives considered**:
+
 - KNN-only (`<->` without `ST_DWithin`): no radius enforcement; returns nearest regardless of distance; doesn't meet FR-004
 - Haversine in application code: full table scan; no index benefit; unacceptable at scale
 - BRIN index: smaller footprint but slower for spatial KNN; GiST index is correct choice
@@ -84,11 +86,15 @@ The multi-agency requirement rules out `TRUNCATE` (deletes all agencies). Shadow
 Deletion order must respect FK constraints: `stop_times` → `trips` → `shapes`, `calendar_dates` → then `stops`, `routes` at the agency level.
 
 **Pattern**:
+
 ```typescript
 const qr = dataSource.createQueryRunner();
 await qr.startTransaction('SERIALIZABLE');
 try {
-  await qr.query(`DELETE FROM stop_times WHERE trip_id IN (SELECT trip_id FROM trips WHERE agency_id=$1)`, [agencyId]);
+  await qr.query(
+    `DELETE FROM stop_times WHERE trip_id IN (SELECT trip_id FROM trips WHERE agency_id=$1)`,
+    [agencyId],
+  );
   await qr.query(`DELETE FROM trips WHERE agency_id=$1`, [agencyId]);
   await qr.query(`DELETE FROM stop_times_calendar WHERE agency_id=$1`, [agencyId]);
   await qr.query(`DELETE FROM shapes WHERE agency_id=$1`, [agencyId]);
@@ -105,6 +111,7 @@ try {
 ```
 
 **Alternatives considered**:
+
 - TRUNCATE: deletes all agencies; rejected
 - Shadow table rename: correct but complex schema management; unnecessary for daily batch jobs
 - Upsert per row: N+1 operations on 500K+ rows; not atomic; too slow
@@ -129,10 +136,11 @@ await pipeline.exec();
 
 // API read
 const all = await redis.hgetall(`vehicles:${agencyId}`);
-return Object.values(all).map(v => JSON.parse(v));
+return Object.values(all).map((v) => JSON.parse(v));
 ```
 
 **Alternatives considered**:
+
 - One key per vehicle + SCAN: requires SCAN across potentially 5,000 keys per agency; O(N) with cursor iteration
 - Single JSON blob per agency: must deserialize full blob to update one vehicle; 500-vehicle fleet × 15s intervals = high serialization cost
 - Redis Streams: overkill; designed for event sourcing and consumer groups, not latest-state lookup
@@ -169,6 +177,7 @@ Package versions: `leaflet@^1.9.4`, `react-leaflet@^4.2.3`, `@types/leaflet@^1.9
 **Known issue**: Leaflet's default icon assets resolve via `_getIconUrl` which breaks in webpack. Fix by calling `delete L.Icon.Default.prototype._getIconUrl` and supplying explicit icon URLs at app initialization.
 
 **Alternatives considered**:
+
 - `useEffect` with conditional import: works but increases bundle size (not code-split); less idiomatic
 - Mapbox GL JS: SSR-compatible but proprietary tiles require API key; contradicts OpenStreetMap requirement
 - `@vis.gl/react-maplibre`: modern SSR-compatible option but diverges from the specified OpenStreetMap+Leaflet approach
@@ -200,6 +209,7 @@ location @rate_limit_429 {
 ```
 
 **Alternatives considered**:
+
 - NestJS `@nestjs/throttler` or `express-rate-limit`: application-layer; rate limits after backend startup; less efficient
 - Redis-backed rate limiter: appropriate for distributed multi-node deployments; over-engineered for single-node Docker Compose
 - `limit_req` on all routes including frontend: frontend assets are static and don't need per-IP limiting
@@ -216,7 +226,7 @@ location @rate_limit_429 {
 ```yaml
 postgres:
   healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U gtfs_user -d gtfs_db"]
+    test: ['CMD-SHELL', 'pg_isready -U gtfs_user -d gtfs_db']
     interval: 5s
     timeout: 3s
     retries: 5
@@ -224,7 +234,7 @@ postgres:
 
 redis:
   healthcheck:
-    test: ["CMD", "redis-cli", "ping"]
+    test: ['CMD', 'redis-cli', 'ping']
     interval: 5s
     timeout: 2s
     retries: 5
@@ -234,7 +244,7 @@ backend:
     postgres: { condition: service_healthy }
     redis: { condition: service_healthy }
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+    test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
     interval: 10s
     timeout: 3s
     retries: 5
@@ -244,7 +254,7 @@ frontend:
   depends_on:
     backend: { condition: service_healthy }
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+    test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/health']
     interval: 10s
     timeout: 3s
     retries: 5
@@ -255,13 +265,18 @@ worker:
     postgres: { condition: service_healthy }
     redis: { condition: service_healthy }
   healthcheck:
-    test: ["CMD-SHELL", "test -f /tmp/worker-alive && [ $(( $(date +%s) - $(stat -c %Y /tmp/worker-alive) )) -lt 120 ]"]
+    test:
+      [
+        'CMD-SHELL',
+        'test -f /tmp/worker-alive && [ $(( $(date +%s) - $(stat -c %Y /tmp/worker-alive) )) -lt 120 ]',
+      ]
     interval: 30s
     timeout: 5s
     retries: 3
 ```
 
 **Alternatives considered**:
+
 - No health checks (just `depends_on` without condition): only checks container start, not service readiness; causes race conditions on first startup
 - Custom HTTP server in worker: adds unnecessary complexity for a background job
 - `start_period` omitted: health checks fire immediately; backend fails before NestJS finishes bootstrapping (migrations, module initialization)
@@ -270,12 +285,12 @@ worker:
 
 ## Summary of All Decisions
 
-| Area | Decision | Package/Version |
-|------|----------|-----------------|
-| GTFS-RT parsing | `@googletag/gtfs-realtime-bindings` | v0.0.9 |
-| Geospatial query | `ST_DWithin` + `<->` KNN, `GEOMETRY(Point, 4326)`, GiST index | PostGIS 3.4 |
-| Atomic re-ingestion | SERIALIZABLE transaction, DELETE by `agency_id` + INSERT | TypeORM QueryRunner |
-| Vehicle position cache | `HSET vehicles:{agencyId}`, TTL 30s, Redis pipeline | ioredis v5 |
-| Map rendering | `next/dynamic` + `ssr: false`, react-leaflet | react-leaflet v4.2.3, leaflet v1.9.4 |
-| Rate limiting | NGINX `limit_req_zone` 1r/s, burst=10, `/api/` only | nginx 1.27-alpine |
-| Health checks | Service-specific: pg_isready / redis-cli ping / curl /health | Docker Compose v3.8+ |
+| Area                   | Decision                                                      | Package/Version                      |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------------ |
+| GTFS-RT parsing        | `@googletag/gtfs-realtime-bindings`                           | v0.0.9                               |
+| Geospatial query       | `ST_DWithin` + `<->` KNN, `GEOMETRY(Point, 4326)`, GiST index | PostGIS 3.4                          |
+| Atomic re-ingestion    | SERIALIZABLE transaction, DELETE by `agency_id` + INSERT      | TypeORM QueryRunner                  |
+| Vehicle position cache | `HSET vehicles:{agencyId}`, TTL 30s, Redis pipeline           | ioredis v5                           |
+| Map rendering          | `next/dynamic` + `ssr: false`, react-leaflet                  | react-leaflet v4.2.3, leaflet v1.9.4 |
+| Rate limiting          | NGINX `limit_req_zone` 1r/s, burst=10, `/api/` only           | nginx 1.27-alpine                    |
+| Health checks          | Service-specific: pg_isready / redis-cli ping / curl /health  | Docker Compose v3.8+                 |

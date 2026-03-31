@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-import { Agency } from '../../agencies/entities/agency.entity.js';
+import { Agency } from '../../agencies/entities/agency.entity';
 
 @Entity('shapes')
 @Index(['agencyId', 'shapeId', 'ptSequence'])

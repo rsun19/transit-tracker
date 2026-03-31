@@ -5,7 +5,7 @@
 **Status**: Draft  
 **Input**: Scalable dockerized GTFS web application with Next.js frontend, NestJS backend, PostgreSQL+PostGIS, Redis caching, GTFS ingestion worker, and NGINX reverse proxy supporting plug-in transit agency configuration
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Route & Stop Discovery (Priority: P1)
 
@@ -36,7 +36,9 @@ A rider wants to see where buses or trains are right now on an interactive map. 
 **Acceptance Scenarios**:
 
 1. **Given** the realtime feed is active and returning vehicle positions, **When** a rider opens the live map view, **Then** each vehicle appears as a marker on the OpenStreetMap map at its current position
+
 - **Given** a vehicle has moved, **When** the rider watches the map, **Then** the vehicle's marker updates to reflect the new position within 30 seconds via automatic client-side polling every 15 seconds, without a manual page refresh
+
 3. **Given** the rider selects a vehicle marker, **When** the detail panel opens, **Then** the vehicle's assigned route, next scheduled stop, and time of last position update are displayed
 4. **Given** the realtime feed is temporarily unavailable, **When** the rider views the live map, **Then** a clearly visible notice says "Live tracking is temporarily unavailable" and the map remains functional showing route shapes and static stop markers
 5. **Given** route shapes are stored, **When** the map loads, **Then** each route's path is drawn as a coloured polyline on the map
@@ -87,7 +89,7 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 - When a GTFS feed ZIP archive is malformed or only partially downloaded: the ingestion job aborts that agency's ingest before opening a database transaction, logs the failure at ERROR level, and preserves the agency's existing database records unchanged (FR-025).
 - When the Redis cache layer is unavailable: all API endpoints fall back to direct PostgreSQL queries; Redis unavailability is transparent to the client and does not produce 5xx errors (FR-024).
 
-## Requirements *(mandatory)*
+## Requirements _(mandatory)_
 
 ### Functional Requirements
 
@@ -133,7 +135,7 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 - **TripUpdate**: A realtime prediction of arrival and departure times for each remaining stop on an in-progress trip, including delay in seconds.
 - **ServiceAlert**: A realtime notification describing a disruption (delay, detour, suspension) affecting one or more routes, stops, or trips; includes human-readable cause and effect text.
 
-## Success Criteria *(mandatory)*
+## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 
@@ -188,4 +190,3 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 - Fare information, trip costs, or payment integration
 - Self-hosted OpenStreetMap tile server
 - Multi-region route planning (journeys that cross agency boundaries)
-

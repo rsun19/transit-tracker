@@ -21,39 +21,39 @@ Build a scalable, config-driven, multi-agency GTFS transit tracking platform del
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design.*
+_GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design._
 
 ### Principle I — Code Quality ✅ PASS
 
-- TypeScript strict mode (`strict: true`) enforced in all packages via shared `tsconfig.base.json`  
-- ESLint + Prettier configured workspace-wide; zero-warning policy enforced in CI  
-- NestJS module structure (one module per domain) enforces single-responsibility at the framework level  
-- All feed URLs, TTL values, and polling intervals declared as named constants in `config/` — no magic values in service code  
+- TypeScript strict mode (`strict: true`) enforced in all packages via shared `tsconfig.base.json`
+- ESLint + Prettier configured workspace-wide; zero-warning policy enforced in CI
+- NestJS module structure (one module per domain) enforces single-responsibility at the framework level
+- All feed URLs, TTL values, and polling intervals declared as named constants in `config/` — no magic values in service code
 - Dependency audit: `@googletag/gtfs-realtime-bindings` is the official Google package; no duplication of stdlib fetch (node-fetch only for Node 18 compatibility with older Docker images)
 
 ### Principle II — Testing Standards ✅ PASS
 
-- Test-first: acceptance scenarios in spec.md are the source for test cases written before implementation  
-- ≥ 80% coverage enforced via Jest `--coverageThreshold` in all packages  
-- Unit tests: GTFS CSV parser utilities, cache-aside logic, coordinate validation, protobuf extraction functions  
-- Integration tests: ingestion pipeline against Docker Compose test database (TypeORM test fixtures), API endpoint integration via Supertest  
-- Contract tests: API response schema snapshot tests via Jest + JSON schema; run in every CI build  
+- Test-first: acceptance scenarios in spec.md are the source for test cases written before implementation
+- ≥ 80% coverage enforced via Jest `--coverageThreshold` in all packages
+- Unit tests: GTFS CSV parser utilities, cache-aside logic, coordinate validation, protobuf extraction functions
+- Integration tests: ingestion pipeline against Docker Compose test database (TypeORM test fixtures), API endpoint integration via Supertest
+- Contract tests: API response schema snapshot tests via Jest + JSON schema; run in every CI build
 - Accessibility: `jest-axe` assertions in frontend component tests; axe-core in playwright E2E
 
 ### Principle III — UX Consistency ✅ PASS
 
-- MUI `createTheme` defines the design system (palette, typography scale, spacing, breakpoints); all components receive the theme via `ThemeProvider` — no hardcoded hex/px values in components  
-- All five views (search, route detail, stop detail, nearby stops, live map) use MUI `Skeleton` for loading states and a shared `EmptyState` component built on MUI `Box` + `Typography`  
-- WCAG 2.1 AA: MUI components ship with ARIA attributes; `jest-axe` assertions in unit tests and axe-playwright in E2E CI scans cover any custom overrides; violations are blocking  
-- Every error state includes a human-readable message via MUI `Alert` with an `action` prop for suggested recovery; no generic "Something went wrong"  
-- Uniform polling interaction: all realtime-updating views use the same `usePolling(interval, fetcher)` hook for consistency  
+- MUI `createTheme` defines the design system (palette, typography scale, spacing, breakpoints); all components receive the theme via `ThemeProvider` — no hardcoded hex/px values in components
+- All five views (search, route detail, stop detail, nearby stops, live map) use MUI `Skeleton` for loading states and a shared `EmptyState` component built on MUI `Box` + `Typography`
+- WCAG 2.1 AA: MUI components ship with ARIA attributes; `jest-axe` assertions in unit tests and axe-playwright in E2E CI scans cover any custom overrides; violations are blocking
+- Every error state includes a human-readable message via MUI `Alert` with an `action` prop for suggested recovery; no generic "Something went wrong"
+- Uniform polling interaction: all realtime-updating views use the same `usePolling(interval, fetcher)` hook for consistency
 - Leaflet CSS (`leaflet/dist/leaflet.css`) is imported globally for map rendering; all non-map UI uses MUI exclusively
 
 ### Principle IV — Performance ✅ PASS (with documented exception)
 
-- PostGIS GiST spatial index on `stops.location` ensures KNN + `ST_DWithin` queries ≤ 50 ms at 9,000-stop scale  
-- Redis cache-aside keeps departure and nearby-stop API responses < 5 ms after first miss  
-- Next.js code splitting: Leaflet and react-leaflet loaded via `next/dynamic` with `ssr: false` — map page bundle excluded from initial chunk  
+- PostGIS GiST spatial index on `stops.location` ensures KNN + `ST_DWithin` queries ≤ 50 ms at 9,000-stop scale
+- Redis cache-aside keeps departure and nearby-stop API responses < 5 ms after first miss
+- Next.js code splitting: Leaflet and react-leaflet loaded via `next/dynamic` with `ssr: false` — map page bundle excluded from initial chunk
 - Initial chunk (search page): MUI v6 (named imports only, tree-shaken via `@mui/material/Button` style imports), React core, Next.js router ≈ 130–150 KB gzipped — at the 150 KB budget boundary; discipline over named imports is required to stay within budget
 
 **Performance exception logged** (see Complexity Tracking):  
@@ -166,7 +166,6 @@ docker-compose.dev.yml          # Dev override (volume mounts, hot reload)
 
 ## Complexity Tracking
 
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
+| Violation                                                                                           | Why Needed                                                                                                                                                                                                                        | Simpler Alternative Rejected Because                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Constitution Principle IV: "real-time data refresh ≤ 5 s" vs. 30-second end-to-end client staleness | GTFS-RT feeds are themselves updated every 15–30 seconds at the provider level (MBTA spec); WebSocket push would require a stateful connection manager and is explicitly out of scope; polling is the only compliant architecture | WebSocket push is listed as Out of Scope in spec.md; reducing poll interval below 15 s would violate MBTA's API usage guidelines and increase infra cost disproportionately |
-

@@ -1,6 +1,6 @@
 import { Controller, Get, Query, ServiceUnavailableException } from '@nestjs/common';
-import { CacheService } from '../cache/cache.service.js';
-import { AgenciesService } from '../agencies/agencies.service.js';
+import { CacheService } from '../cache/cache.service';
+import { AgenciesService } from '../agencies/agencies.service';
 
 @Controller('api/v1/vehicles')
 export class VehiclesController {

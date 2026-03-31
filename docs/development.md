@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool | Minimum Version | Install |
-|------|----------------|---------|
-| Docker Desktop | 25.x | https://docs.docker.com/get-docker/ |
-| Docker Compose | v2.x (plugin) | Included with Docker Desktop |
-| Git | any | https://git-scm.com |
+| Tool           | Minimum Version | Install                             |
+| -------------- | --------------- | ----------------------------------- |
+| Docker Desktop | 25.x            | https://docs.docker.com/get-docker/ |
+| Docker Compose | v2.x (plugin)   | Included with Docker Desktop        |
+| Git            | any             | https://git-scm.com                 |
 
 No language runtimes need to be installed on the host — everything runs inside containers.
 
@@ -55,13 +55,13 @@ First run downloads images, builds containers, initialises the database, and run
 
 Once all containers report `healthy`:
 
-| URL | Description |
-|-----|-------------|
-| `http://localhost` | Frontend application |
-| `http://localhost/health` | NGINX + backend health check |
-| `http://localhost/api/v1/agencies` | Lists ingested agencies |
-| `http://localhost/api/v1/routes?agencyKey=mbta` | MBTA route list |
-| `http://localhost/api/v1/vehicles/live?agencyKey=mbta` | Live vehicle positions |
+| URL                                                    | Description                  |
+| ------------------------------------------------------ | ---------------------------- |
+| `http://localhost`                                     | Frontend application         |
+| `http://localhost/health`                              | NGINX + backend health check |
+| `http://localhost/api/v1/agencies`                     | Lists ingested agencies      |
+| `http://localhost/api/v1/routes?agencyKey=mbta`        | MBTA route list              |
+| `http://localhost/api/v1/vehicles/live?agencyKey=mbta` | Live vehicle positions       |
 
 Quick smoke test:
 
@@ -83,12 +83,12 @@ Use the dev Compose overlay to mount source directories as volumes, so code chan
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
-| Service | Dev URL | Hot reload |
-|---------|---------|-----------|
+| Service  | Dev URL                 | Hot reload                 |
+| -------- | ----------------------- | -------------------------- |
 | Frontend | `http://localhost:3001` | Yes — Next.js fast refresh |
-| Backend | `http://localhost:3000` | Yes — NestJS watch mode |
-| Postgres | `localhost:5432` | N/A |
-| Redis | `localhost:6379` | N/A |
+| Backend  | `http://localhost:3000` | Yes — NestJS watch mode    |
+| Postgres | `localhost:5432`        | N/A                        |
+| Redis    | `localhost:6379`        | N/A                        |
 
 The NGINX proxy on port 8080 is still available in dev mode and routes normally.
 
@@ -112,14 +112,88 @@ docker compose exec backend npm run test:cov
 docker compose exec frontend npm test
 ```
 
+### Root quality-gate commands
+
+Run these commands from repository root to mirror CI gate behavior:
+
+```sh
+npm run lint
+npm run format:check
+npm run test:unit
+npm run test:integration
+npm run test:contract
+npm run test:a11y
+npm run test:performance
+npm run test:e2e
+```
+
+Interactive Cypress debugging from root:
+
+```sh
+npm run dev
+npm run test:e2e:open
+```
+
+### Required CI check names (branch protection)
+
+Configure branch protection to require the following checks:
+
+- `lint`
+- `unit`
+- `integration`
+- `contract`
+- `accessibility`
+- `performance`
+- `peer-review-validation`
+- `cypress-map`
+- `cypress-stops`
+- `cypress-routes`
+- `cypress-core-smoke`
+
+Merge readiness requires all checks to pass and at least one non-author approval.
+
+### Gate failure semantics
+
+- Any required check failure blocks merge.
+- Cypress jobs fail if a group discovers zero tests.
+- Cypress flow also fails when total scenarios across groups drops below 12.
+- Unit gate fails on coverage floor breach (backend >= 85%, frontend >= 80%) or baseline regression when baselines are provided.
+
+### Pre-commit and formatter interoperability troubleshooting
+
+- Pre-commit hook executes `npm run format:check` and `lint-staged`.
+- If hook exits with `command not found: lint-staged`, run `npm ci` at repository root.
+- If ESLint reports formatting conflicts, ensure backend and frontend ESLint configs extend `prettier`.
+- If Prettier checks fail on generated files, verify `.prettierignore` includes those paths.
+- To auto-fix staged files before retrying commit: `npx lint-staged`.
+
+### SC-003 contributor validation protocol
+
+For a release candidate, sample at least 10 contributors and capture local execution timings:
+
+| Contributor | Date | `npm run test:unit` | `npm run test:e2e` | `npm run test:e2e:open` preflight | Notes |
+| ----------- | ---- | ------------------- | ------------------ | --------------------------------- | ----- |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+|             |      |                     |                    |                                   |       |
+
+Record command output snippets and blockers in `specs/002-test-automation-ci/research.md`.
+
 ### Test structure
 
-| Path | Type |
-|------|------|
-| `backend/src/**/*.spec.ts` | Unit tests |
+| Path                                | Type                               |
+| ----------------------------------- | ---------------------------------- |
+| `backend/src/**/*.spec.ts`          | Unit tests                         |
 | `backend/src/**/*.contract.spec.ts` | Contract tests (match API schemas) |
-| `backend/test/**` | Integration / e2e tests |
-| `frontend/src/**/*.test.tsx` | Frontend component tests |
+| `backend/test/**`                   | Integration / e2e tests            |
+| `frontend/src/**/*.test.tsx`        | Frontend component tests           |
 
 ---
 
@@ -210,11 +284,11 @@ transit-tracker/
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---------|-------------|-----|
-| `transit-backend` exits with `ECONNREFUSED` | Postgres not ready yet | Wait 30 s; health check retries automatically |
-| Worker logs "feed download failed" | Invalid URL or missing API key | Check `.env`; verify the URL is reachable from inside the container (`docker compose exec worker curl <url>`) |
-| Frontend shows "No data available yet" | Ingestion hasn't finished | Check `docker compose logs worker` and wait for the ingest to complete |
-| HTTP 429 from `/api/` | Rate limit hit | Slow down requests; limit is 1 req/s sustained, burst 10 per IP |
-| Map shows no vehicle markers | Realtime feed disabled or unreachable | Check `gtfsRealtimeUrl` in `config/agencies.json`; check worker logs |
-| `docker compose up` fails on `permission denied` | Docker socket not accessible | Ensure Docker Desktop is running and your user is in the `docker` group |
+| Symptom                                          | Likely cause                          | Fix                                                                                                           |
+| ------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `transit-backend` exits with `ECONNREFUSED`      | Postgres not ready yet                | Wait 30 s; health check retries automatically                                                                 |
+| Worker logs "feed download failed"               | Invalid URL or missing API key        | Check `.env`; verify the URL is reachable from inside the container (`docker compose exec worker curl <url>`) |
+| Frontend shows "No data available yet"           | Ingestion hasn't finished             | Check `docker compose logs worker` and wait for the ingest to complete                                        |
+| HTTP 429 from `/api/`                            | Rate limit hit                        | Slow down requests; limit is 1 req/s sustained, burst 10 per IP                                               |
+| Map shows no vehicle markers                     | Realtime feed disabled or unreachable | Check `gtfsRealtimeUrl` in `config/agencies.json`; check worker logs                                          |
+| `docker compose up` fails on `permission denied` | Docker socket not accessible          | Ensure Docker Desktop is running and your user is in the `docker` group                                       |

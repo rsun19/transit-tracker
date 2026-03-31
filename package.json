@@ -2,6 +2,7 @@
   "name": "transit-tracker",
   "private": true,
   "scripts": {
+    "prepare": "husky",
     "dev": "docker-compose -f docker-compose.dev.yml up --build",
     "dev:down": "docker-compose -f docker-compose.dev.yml down",
     "start": "docker compose up --build",
@@ -11,6 +12,27 @@
     "logs:worker": "docker compose logs -f worker",
     "logs:frontend": "docker compose logs -f frontend",
     "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
-    "lint:fix": "npm run lint:fix --prefix backend && npm run lint:fix --prefix frontend"
+    "lint:fix": "npm run lint:fix --prefix backend && npm run lint:fix --prefix frontend",
+    "format": "prettier --write \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
+    "test:unit": "npm run test:cov --prefix backend && npm run test:cov --prefix frontend && node scripts/ci/check-unit-coverage.mjs",
+    "test:integration": "node scripts/ci/run-gate.mjs integration",
+    "test:contract": "node scripts/ci/run-gate.mjs contract",
+    "test:a11y": "node scripts/ci/run-accessibility-gate.mjs",
+    "test:performance": "node scripts/ci/run-performance-gate.mjs",
+    "test:e2e": "node scripts/e2e/run-all-cypress-headless.mjs",
+    "test:e2e:group": "node scripts/e2e/run-cypress-group.mjs",
+    "test:e2e:open": "node scripts/e2e/open-cypress-interactive.mjs",
+    "test:all": "npm run lint && npm run format:check && npm run test:unit && npm run test:integration && npm run test:contract && npm run test:a11y && npm run test:performance && npm run test:e2e",
+    "test": "npm run test:all",
+    "ci:gate": "node scripts/ci/run-gate.mjs",
+    "ci:assert-checks": "node scripts/ci/assert-required-checks.mjs"
+  },
+  "devDependencies": {
+    "cypress": "^14.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.6.2",
+    "typescript": "^6.0.2"
   }
 }

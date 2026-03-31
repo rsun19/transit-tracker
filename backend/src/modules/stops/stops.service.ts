@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { Stop } from './entities/stop.entity.js';
-import { StopTime } from './entities/stop-time.entity.js';
-import { Route } from '../routes/entities/route.entity.js';
-import { CacheService } from '../cache/cache.service.js';
+import { Stop } from './entities/stop.entity';
+import { StopTime } from './entities/stop-time.entity';
+import { Route } from '../routes/entities/route.entity';
+import { CacheService } from '../cache/cache.service';
 import {
   API_CACHE_DEPARTURES_TTL_S,
   API_CACHE_NEARBY_TTL_S,
@@ -12,7 +12,7 @@ import {
   MAX_SEARCH_LIMIT,
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
-} from '../../common/constants.js';
+} from '../../common/constants';
 
 export interface StopResponse {
   id: string;
@@ -96,7 +96,8 @@ export class StopsService {
   ): Promise<{ data: DepartureResponse[]; stopId: string; agencyKey: string }> {
     const cacheKey = `cache:departures:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
-    if (cached) return JSON.parse(cached) as { data: DepartureResponse[]; stopId: string; agencyKey: string };
+    if (cached)
+      return JSON.parse(cached) as { data: DepartureResponse[]; stopId: string; agencyKey: string };
 
     // Get today's day of week to look up active service_ids
     const now = new Date();
@@ -104,14 +105,16 @@ export class StopsService {
     const dayCol = dayNames[now.getDay()];
     const todayDate = now.toISOString().slice(0, 10).replace(/-/g, '');
 
-    const rows = await this.dataSource.query<Array<{
-      trip_id: string;
-      route_id: string;
-      short_name: string | null;
-      long_name: string | null;
-      trip_headsign: string | null;
-      departure_time: string;
-    }>>(
+    const rows = await this.dataSource.query<
+      Array<{
+        trip_id: string;
+        route_id: string;
+        short_name: string | null;
+        long_name: string | null;
+        trip_headsign: string | null;
+        departure_time: string;
+      }>
+    >(
       `SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
               (CURRENT_DATE + st.departure_time)::text AS departure_time
        FROM stop_times st
@@ -149,13 +152,22 @@ export class StopsService {
   async getRoutesForStop(
     stopId: string,
     agencyKey: string,
-  ): Promise<{ data: { routeId: string; shortName: string | null; longName: string | null; routeType: number }[] }> {
-    const rows = await this.dataSource.query<Array<{
-      route_id: string;
-      short_name: string | null;
-      long_name: string | null;
-      route_type: number;
-    }>>(
+  ): Promise<{
+    data: {
+      routeId: string;
+      shortName: string | null;
+      longName: string | null;
+      routeType: number;
+    }[];
+  }> {
+    const rows = await this.dataSource.query<
+      Array<{
+        route_id: string;
+        short_name: string | null;
+        long_name: string | null;
+        route_type: number;
+      }>
+    >(
       `SELECT DISTINCT r.route_id, r.short_name, r.long_name, r.route_type
        FROM stop_times st
        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
@@ -182,7 +194,11 @@ export class StopsService {
     radiusM?: number;
     agencyKey?: string;
     limit?: number;
-  }): Promise<{ data: (StopResponse & { nextDeparture?: DepartureResponse | null })[]; searchCentre: { lat: number; lon: number }; radiusMetres: number }> {
+  }): Promise<{
+    data: (StopResponse & { nextDeparture?: DepartureResponse | null })[];
+    searchCentre: { lat: number; lon: number };
+    radiusMetres: number;
+  }> {
     const radius = Math.min(params.radiusM ?? NEARBY_DEFAULT_RADIUS_M, NEARBY_MAX_RADIUS_M);
     const limit = Math.min(params.limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
     const latRounded = params.lat.toFixed(3);
@@ -190,22 +206,27 @@ export class StopsService {
 
     const cacheKey = `cache:stops:nearby:${latRounded}:${lonRounded}:${radius}:${params.agencyKey ?? 'all'}`;
     const cached = await this.cacheService.get(cacheKey);
-    if (cached) return JSON.parse(cached) as ReturnType<typeof this.getNearbyStops> extends Promise<infer T> ? T : never;
+    if (cached)
+      return JSON.parse(cached) as ReturnType<typeof this.getNearbyStops> extends Promise<infer T>
+        ? T
+        : never;
 
     const agencyFilter = params.agencyKey
       ? `AND a.agency_key = '${params.agencyKey.replace(/'/g, "''")}'`
       : '';
 
-    const rows = await this.dataSource.query<Array<{
-      id: string;
-      stop_id: string;
-      stop_name: string;
-      stop_code: string | null;
-      wheelchair_boarding: number | null;
-      lat: number;
-      lon: number;
-      distance_metres: number;
-    }>>(
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        stop_id: string;
+        stop_name: string;
+        stop_code: string | null;
+        wheelchair_boarding: number | null;
+        lat: number;
+        lon: number;
+        distance_metres: number;
+      }>
+    >(
       `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
               ST_Y(s.location::geometry) AS lat,
               ST_X(s.location::geometry) AS lon,

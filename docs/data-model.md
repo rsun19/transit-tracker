@@ -2,11 +2,11 @@
 
 ## Storage Layers
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Primary store | PostgreSQL 16 + PostGIS 3.4 | All static GTFS data — source of truth |
-| Realtime cache | Redis 7 (per-agency keys, TTL-based) | Vehicle positions and service alerts |
-| Response cache | Redis 7 (short TTL string keys) | Memoized API responses |
+| Layer          | Technology                           | Purpose                                |
+| -------------- | ------------------------------------ | -------------------------------------- |
+| Primary store  | PostgreSQL 16 + PostGIS 3.4          | All static GTFS data — source of truth |
+| Realtime cache | Redis 7 (per-agency keys, TTL-based) | Vehicle positions and service alerts   |
+| Response cache | Redis 7 (short TTL string keys)      | Memoized API responses                 |
 
 ---
 
@@ -18,63 +18,63 @@ All tables share a common design principle: every row includes an `agency_id UUI
 
 One row per configured transit provider.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `agency_id` | `UUID` | `PRIMARY KEY` |
-| `agency_key` | `VARCHAR(50)` | `UNIQUE NOT NULL` — URL-slug (e.g. `mbta`) |
-| `display_name` | `TEXT` | `NOT NULL` |
-| `timezone` | `VARCHAR(64)` | `NOT NULL` — IANA timezone string |
-| `gtfs_static_url` | `TEXT` | `NOT NULL` |
-| `gtfs_realtime_url` | `TEXT` | nullable |
-| `api_key_env_var` | `VARCHAR(128)` | nullable — name of env var holding the API key |
-| `last_ingested_at` | `TIMESTAMPTZ` | nullable |
-| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` |
+| Column              | Type           | Constraints                                    |
+| ------------------- | -------------- | ---------------------------------------------- |
+| `agency_id`         | `UUID`         | `PRIMARY KEY`                                  |
+| `agency_key`        | `VARCHAR(50)`  | `UNIQUE NOT NULL` — URL-slug (e.g. `mbta`)     |
+| `display_name`      | `TEXT`         | `NOT NULL`                                     |
+| `timezone`          | `VARCHAR(64)`  | `NOT NULL` — IANA timezone string              |
+| `gtfs_static_url`   | `TEXT`         | `NOT NULL`                                     |
+| `gtfs_realtime_url` | `TEXT`         | nullable                                       |
+| `api_key_env_var`   | `VARCHAR(128)` | nullable — name of env var holding the API key |
+| `last_ingested_at`  | `TIMESTAMPTZ`  | nullable                                       |
+| `created_at`        | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                |
 
 ### `routes`
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `route_id` | `VARCHAR(100)` | `NOT NULL` — from GTFS feed |
-| `short_name` | `VARCHAR(50)` | nullable |
-| `long_name` | `TEXT` | nullable |
-| `route_type` | `SMALLINT` | `NOT NULL` — 0=tram, 1=subway, 2=rail, 3=bus, 4=ferry |
-| `color` | `VARCHAR(6)` | nullable — hex without `#` |
-| `text_color` | `VARCHAR(6)` | nullable |
-| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` |
+| Column       | Type           | Constraints                                           |
+| ------------ | -------------- | ----------------------------------------------------- |
+| `id`         | `UUID`         | `PRIMARY KEY`                                         |
+| `agency_id`  | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE`      |
+| `route_id`   | `VARCHAR(100)` | `NOT NULL` — from GTFS feed                           |
+| `short_name` | `VARCHAR(50)`  | nullable                                              |
+| `long_name`  | `TEXT`         | nullable                                              |
+| `route_type` | `SMALLINT`     | `NOT NULL` — 0=tram, 1=subway, 2=rail, 3=bus, 4=ferry |
+| `color`      | `VARCHAR(6)`   | nullable — hex without `#`                            |
+| `text_color` | `VARCHAR(6)`   | nullable                                              |
+| `created_at` | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                       |
 
 **Indexes**: `UNIQUE (agency_id, route_id)` · `INDEX (agency_id, route_type)`
 
 ### `stops`
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `stop_id` | `VARCHAR(100)` | `NOT NULL` — from GTFS feed |
-| `stop_name` | `TEXT` | `NOT NULL` |
-| `stop_code` | `VARCHAR(50)` | nullable |
-| `location` | `GEOMETRY(Point, 4326)` | `NOT NULL` — WGS84 lat/lon |
-| `parent_station_id` | `VARCHAR(100)` | nullable |
-| `wheelchair_boarding` | `SMALLINT` | 0=unknown, 1=accessible, 2=inaccessible |
-| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` |
+| Column                | Type                    | Constraints                                      |
+| --------------------- | ----------------------- | ------------------------------------------------ |
+| `id`                  | `UUID`                  | `PRIMARY KEY`                                    |
+| `agency_id`           | `UUID`                  | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `stop_id`             | `VARCHAR(100)`          | `NOT NULL` — from GTFS feed                      |
+| `stop_name`           | `TEXT`                  | `NOT NULL`                                       |
+| `stop_code`           | `VARCHAR(50)`           | nullable                                         |
+| `location`            | `GEOMETRY(Point, 4326)` | `NOT NULL` — WGS84 lat/lon                       |
+| `parent_station_id`   | `VARCHAR(100)`          | nullable                                         |
+| `wheelchair_boarding` | `SMALLINT`              | 0=unknown, 1=accessible, 2=inaccessible          |
+| `created_at`          | `TIMESTAMPTZ`           | `DEFAULT NOW()`                                  |
 
 **Indexes**: `UNIQUE (agency_id, stop_id)` · `GiST INDEX (location)` — required for PostGIS spatial queries · `INDEX (agency_id, stop_code)`
 
 ### `trips`
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `trip_id` | `VARCHAR(100)` | `NOT NULL` |
-| `route_id` | `VARCHAR(100)` | `NOT NULL` |
-| `service_id` | `VARCHAR(100)` | `NOT NULL` |
-| `shape_id` | `VARCHAR(100)` | nullable |
-| `trip_headsign` | `TEXT` | nullable |
-| `direction_id` | `SMALLINT` | 0=outbound, 1=inbound |
-| `wheelchair_accessible` | `SMALLINT` | |
+| Column                  | Type           | Constraints                                      |
+| ----------------------- | -------------- | ------------------------------------------------ |
+| `id`                    | `UUID`         | `PRIMARY KEY`                                    |
+| `agency_id`             | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `trip_id`               | `VARCHAR(100)` | `NOT NULL`                                       |
+| `route_id`              | `VARCHAR(100)` | `NOT NULL`                                       |
+| `service_id`            | `VARCHAR(100)` | `NOT NULL`                                       |
+| `shape_id`              | `VARCHAR(100)` | nullable                                         |
+| `trip_headsign`         | `TEXT`         | nullable                                         |
+| `direction_id`          | `SMALLINT`     | 0=outbound, 1=inbound                            |
+| `wheelchair_accessible` | `SMALLINT`     |                                                  |
 
 **Indexes**: `UNIQUE (agency_id, trip_id)` · `INDEX (agency_id, route_id)` · `INDEX (agency_id, service_id)`
 
@@ -82,17 +82,17 @@ One row per configured transit provider.
 
 Associates stops with trips in sequence order. This is the largest table — MBTA has ~500 K rows.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL` — denormalized for efficient per-agency DELETE |
-| `trip_id` | `VARCHAR(100)` | `NOT NULL` |
-| `stop_id` | `VARCHAR(100)` | `NOT NULL` |
-| `stop_sequence` | `INTEGER` | `NOT NULL` |
-| `arrival_time` | `INTERVAL` | nullable |
-| `departure_time` | `INTERVAL` | `NOT NULL` |
-| `pickup_type` | `SMALLINT` | `DEFAULT 0` |
-| `drop_off_type` | `SMALLINT` | `DEFAULT 0` |
+| Column           | Type           | Constraints                                               |
+| ---------------- | -------------- | --------------------------------------------------------- |
+| `id`             | `UUID`         | `PRIMARY KEY`                                             |
+| `agency_id`      | `UUID`         | `NOT NULL` — denormalized for efficient per-agency DELETE |
+| `trip_id`        | `VARCHAR(100)` | `NOT NULL`                                                |
+| `stop_id`        | `VARCHAR(100)` | `NOT NULL`                                                |
+| `stop_sequence`  | `INTEGER`      | `NOT NULL`                                                |
+| `arrival_time`   | `INTERVAL`     | nullable                                                  |
+| `departure_time` | `INTERVAL`     | `NOT NULL`                                                |
+| `pickup_type`    | `SMALLINT`     | `DEFAULT 0`                                               |
+| `drop_off_type`  | `SMALLINT`     | `DEFAULT 0`                                               |
 
 **Indexes**: `INDEX (agency_id, trip_id, stop_sequence)` · `INDEX (agency_id, stop_id, departure_time)`
 
@@ -102,13 +102,13 @@ Associates stops with trips in sequence order. This is the largest table — MBT
 
 Ordered coordinate points that define a route's geometry on the map.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `shape_id` | `VARCHAR(100)` | `NOT NULL` |
-| `pt_sequence` | `INTEGER` | `NOT NULL` |
-| `location` | `GEOMETRY(Point, 4326)` | `NOT NULL` |
+| Column        | Type                    | Constraints                                      |
+| ------------- | ----------------------- | ------------------------------------------------ |
+| `id`          | `UUID`                  | `PRIMARY KEY`                                    |
+| `agency_id`   | `UUID`                  | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `shape_id`    | `VARCHAR(100)`          | `NOT NULL`                                       |
+| `pt_sequence` | `INTEGER`               | `NOT NULL`                                       |
+| `location`    | `GEOMETRY(Point, 4326)` | `NOT NULL`                                       |
 
 **Indexes**: `INDEX (agency_id, shape_id, pt_sequence)` — for ordered shape retrieval
 
@@ -118,14 +118,14 @@ Shapes are stored as individual points (matching GTFS `shapes.txt`) and assemble
 
 Service pattern schedule — which days of the week a service runs.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `UUID` | `PRIMARY KEY` |
-| `agency_id` | `UUID` | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `service_id` | `VARCHAR(100)` | `NOT NULL` |
-| `monday` … `sunday` | `BOOLEAN` | `NOT NULL` |
-| `start_date` | `DATE` | `NOT NULL` |
-| `end_date` | `DATE` | `NOT NULL` |
+| Column              | Type           | Constraints                                      |
+| ------------------- | -------------- | ------------------------------------------------ |
+| `id`                | `UUID`         | `PRIMARY KEY`                                    |
+| `agency_id`         | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `service_id`        | `VARCHAR(100)` | `NOT NULL`                                       |
+| `monday` … `sunday` | `BOOLEAN`      | `NOT NULL`                                       |
+| `start_date`        | `DATE`         | `NOT NULL`                                       |
+| `end_date`          | `DATE`         | `NOT NULL`                                       |
 
 **Indexes**: `UNIQUE (agency_id, service_id)`
 
@@ -150,21 +150,21 @@ All foreign key relationships cascade `ON DELETE CASCADE` from `agencies`, so dr
 
 ### Realtime keys (written by ingestion worker)
 
-| Key | Type | Content | TTL |
-|-----|------|---------|-----|
+| Key                    | Type     | Content                         | TTL  |
+| ---------------------- | -------- | ------------------------------- | ---- |
 | `vehicles:{agencyKey}` | `STRING` | JSON array of vehicle positions | 30 s |
-| `alerts:{agencyKey}` | `STRING` | JSON array of service alerts | 30 s |
+| `alerts:{agencyKey}`   | `STRING` | JSON array of service alerts    | 30 s |
 
 Both keys are written atomically via a Redis pipeline on each realtime poll cycle. If the key expires (worker stopped), the vehicles endpoint returns `503` and the alerts endpoint returns an empty array.
 
 ### API response cache keys (written by API server)
 
-| Key pattern | TTL | Invalidation |
-|-------------|-----|-------------|
-| `cache:routes:{agencyKey}` | 300 s | Expires naturally; refreshed after GTFS static ingest |
-| `cache:route:v2:{agencyKey}:{routeId}` | 300 s | — |
-| `cache:stop:departures:{agencyKey}:{stopId}:{bucket}` | 20 s | — |
-| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}` | 45 s | — |
+| Key pattern                                           | TTL   | Invalidation                                          |
+| ----------------------------------------------------- | ----- | ----------------------------------------------------- |
+| `cache:routes:{agencyKey}`                            | 300 s | Expires naturally; refreshed after GTFS static ingest |
+| `cache:route:v2:{agencyKey}:{routeId}`                | 300 s | —                                                     |
+| `cache:stop:departures:{agencyKey}:{stopId}:{bucket}` | 20 s  | —                                                     |
+| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`       | 45 s  | —                                                     |
 
 `{lat3dp}` and `{lon3dp}` are latitude/longitude rounded to 3 decimal places (~100 m precision) to improve cache hit rate for nearby-stop queries from slightly different coordinates.
 
@@ -175,6 +175,7 @@ Both keys are written atomically via a Redis pipeline on each realtime poll cycl
 Each agency's static GTFS ingest uses **auto-committed batches** (no wrapping transaction). A single `SERIALIZABLE` transaction across 4M+ rows causes PostgreSQL WAL overflow and crashes on low-memory hosts.
 
 Order of operations:
+
 1. Upsert agency row
 2. DELETE existing child rows (stop_times → trips → shapes → calendars → stops → routes)
 3. `ALTER TABLE stop_times SET UNLOGGED` / `shapes SET UNLOGGED` — eliminates WAL writes during bulk insert

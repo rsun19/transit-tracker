@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { VehiclesController } from './vehicles.controller.js';
-import { CacheModule } from '../cache/cache.module.js';
-import { AgenciesModule } from '../agencies/agencies.module.js';
+import { VehiclesController } from './vehicles.controller';
+import { CacheModule } from '../cache/cache.module';
+import { AgenciesModule } from '../agencies/agencies.module';
 
 @Module({
   imports: [CacheModule, AgenciesModule],

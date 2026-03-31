@@ -29,7 +29,11 @@ export function StopCard({ stop, onClick }: StopCardProps) {
               )}
             </Box>
             {stop.distanceMetres !== undefined && (
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 1, whiteSpace: 'nowrap' }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ ml: 1, whiteSpace: 'nowrap' }}
+              >
                 {stop.distanceMetres < 1000
                   ? `${stop.distanceMetres} m`
                   : `${(stop.distanceMetres / 1000).toFixed(1)} km`}

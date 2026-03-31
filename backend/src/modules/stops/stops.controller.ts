@@ -1,12 +1,6 @@
-import {
-  BadRequestException,
-  Controller,
-  Get,
-  Param,
-  Query,
-} from '@nestjs/common';
-import { StopsService } from './stops.service.js';
-import { NEARBY_MAX_RADIUS_M } from '../../common/constants.js';
+import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
+import { StopsService } from './stops.service';
+import { NEARBY_MAX_RADIUS_M } from '../../common/constants';
 
 @Controller('api/v1/stops')
 export class StopsController {
@@ -25,8 +19,10 @@ export class StopsController {
     const lat = parseFloat(latStr);
     const lon = parseFloat(lonStr);
 
-    if (isNaN(lat) || lat < -90 || lat > 90) throw new BadRequestException('lat must be between -90 and 90');
-    if (isNaN(lon) || lon < -180 || lon > 180) throw new BadRequestException('lon must be between -180 and 180');
+    if (isNaN(lat) || lat < -90 || lat > 90)
+      throw new BadRequestException('lat must be between -90 and 90');
+    if (isNaN(lon) || lon < -180 || lon > 180)
+      throw new BadRequestException('lon must be between -180 and 180');
 
     const radius = radiusStr ? parseInt(radiusStr, 10) : undefined;
     if (radius !== undefined && radius > NEARBY_MAX_RADIUS_M) {
@@ -66,10 +62,7 @@ export class StopsController {
   }
 
   @Get(':stopId/routes')
-  async getRoutesForStop(
-    @Param('stopId') stopId: string,
-    @Query('agencyKey') agencyKey?: string,
-  ) {
+  async getRoutesForStop(@Param('stopId') stopId: string, @Query('agencyKey') agencyKey?: string) {
     if (!agencyKey) throw new BadRequestException('agencyKey is required');
     return this.stopsService.getRoutesForStop(stopId, agencyKey);
   }

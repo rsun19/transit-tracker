@@ -30,7 +30,7 @@ const DEFAULT_AGENCY = 'mbta';
 
 export default function StopDeparturesPage() {
   const params = useParams();
-  const stopId = decodeURIComponent(params?.stopId as string ?? '');
+  const stopId = decodeURIComponent((params?.stopId as string) ?? '');
 
   const [departures, setDepartures] = useState<Departure[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -72,9 +72,7 @@ export default function StopDeparturesPage() {
 
       {loading && <LoadingSkeleton count={6} />}
 
-      {!loading && error && (
-        <EmptyState message="Could not load departures" suggestion={error} />
-      )}
+      {!loading && error && <EmptyState message="Could not load departures" suggestion={error} />}
 
       {!loading && !error && alerts.length > 0 && (
         <Box sx={{ mb: 2 }}>
@@ -109,7 +107,10 @@ export default function StopDeparturesPage() {
             </TableHead>
             <TableBody>
               {departures.map((dep, i) => (
-                <DepartureRow key={`${dep.routeId}-${dep.scheduledDeparture}-${i}`} departure={dep} />
+                <DepartureRow
+                  key={`${dep.routeId}-${dep.scheduledDeparture}-${i}`}
+                  departure={dep}
+                />
               ))}
             </TableBody>
           </Table>

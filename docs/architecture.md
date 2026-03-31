@@ -48,16 +48,17 @@ Reverse proxy and rate limiter. All traffic enters here.
 
 Next.js 14 App Router application. All pages are client components that fetch from `/api/v1` via the shared `api-client.ts`.
 
-| Route | Page |
-|-------|------|
-| `/` | Route search (home) |
-| `/(routes)/[routeId]` | Route detail — stops list, shape, alerts |
-| `/stops` | Stop search |
-| `/stops/[stopId]` | Stop departures table |
-| `/stops/nearby` | Nearby stops (geolocation or manual coordinates) |
-| `/map` | Live vehicle map (Leaflet, SSR disabled) |
+| Route                 | Page                                             |
+| --------------------- | ------------------------------------------------ |
+| `/`                   | Route search (home)                              |
+| `/(routes)/[routeId]` | Route detail — stops list, shape, alerts         |
+| `/stops`              | Stop search                                      |
+| `/stops/[stopId]`     | Stop departures table                            |
+| `/stops/nearby`       | Nearby stops (geolocation or manual coordinates) |
+| `/map`                | Live vehicle map (Leaflet, SSR disabled)         |
 
 Key conventions:
+
 - `usePolling(intervalMs, fetcher)` — shared hook for all realtime-updating views
 - MUI v6 named sub-path imports (`@mui/material/Button`) to stay within 150 KB initial chunk budget
 - `next/dynamic({ ssr: false })` for VehicleMap (Leaflet requires browser APIs)
@@ -66,16 +67,16 @@ Key conventions:
 
 NestJS 10 application. Serves the REST API at `/api/v1`. Modules:
 
-| Module | Endpoints |
-|--------|-----------|
-| `RoutesModule` | `GET /routes`, `GET /routes/:id` |
-| `StopsModule` | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/departures`, `GET /stops/:id/routes` |
-| `TripsModule` | `GET /trips/:id` |
-| `VehiclesModule` | `GET /vehicles/live` |
-| `AlertsModule` | `GET /alerts` |
-| `AgenciesModule` | `GET /agencies` |
-| `HealthModule` | `GET /health` |
-| `CacheModule` | Internal Redis wrapper (cache-aside) |
+| Module           | Endpoints                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `RoutesModule`   | `GET /routes`, `GET /routes/:id`                                                        |
+| `StopsModule`    | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/departures`, `GET /stops/:id/routes` |
+| `TripsModule`    | `GET /trips/:id`                                                                        |
+| `VehiclesModule` | `GET /vehicles/live`                                                                    |
+| `AlertsModule`   | `GET /alerts`                                                                           |
+| `AgenciesModule` | `GET /agencies`                                                                         |
+| `HealthModule`   | `GET /health`                                                                           |
+| `CacheModule`    | Internal Redis wrapper (cache-aside)                                                    |
 
 All routes and stops endpoints use a Redis cache-aside pattern. See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
 
@@ -170,25 +171,25 @@ StopsService.getNearbyStops()
 
 ## Technology Choices
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| ORM | TypeORM 0.3 | NestJS native integration; supports PostGIS geometry columns via raw SQL escape hatches |
-| Spatial queries | PostGIS ST_DWithin + `<->` KNN | GiST index makes radius + nearest-stop queries sub-50 ms at 9 K stops |
-| Realtime protocol | GTFS-RT protobuf | Industry standard; `@googletag/gtfs-realtime-bindings` is the official Google decoder |
-| Redis client | ioredis 5 | Non-blocking, pipeline support, connection retry built-in |
-| Map library | react-leaflet + OpenStreetMap | No API key required; open license; `next/dynamic` eliminates SSR issues |
-| UI library | MUI v6 | Tree-shakeable via named sub-path imports; WCAG 2.1 AA components out of box |
-| Proxy | NGINX | Native `limit_req_zone` for per-IP rate limiting without application code |
+| Decision          | Choice                         | Rationale                                                                               |
+| ----------------- | ------------------------------ | --------------------------------------------------------------------------------------- |
+| ORM               | TypeORM 0.3                    | NestJS native integration; supports PostGIS geometry columns via raw SQL escape hatches |
+| Spatial queries   | PostGIS ST_DWithin + `<->` KNN | GiST index makes radius + nearest-stop queries sub-50 ms at 9 K stops                   |
+| Realtime protocol | GTFS-RT protobuf               | Industry standard; `@googletag/gtfs-realtime-bindings` is the official Google decoder   |
+| Redis client      | ioredis 5                      | Non-blocking, pipeline support, connection retry built-in                               |
+| Map library       | react-leaflet + OpenStreetMap  | No API key required; open license; `next/dynamic` eliminates SSR issues                 |
+| UI library        | MUI v6                         | Tree-shakeable via named sub-path imports; WCAG 2.1 AA components out of box            |
+| Proxy             | NGINX                          | Native `limit_req_zone` for per-IP rate limiting without application code               |
 
 ---
 
 ## Performance Targets
 
-| Metric | Target | Mechanism |
-|--------|--------|-----------|
-| API p95 latency | ≤ 200 ms | Redis cache-aside; PostGIS GiST index |
-| Frontend initial load | ≤ 3 s | Next.js code splitting; MUI named imports |
-| Initial JS chunk | ≤ 150 KB gzipped | `next/dynamic` for Leaflet; named MUI imports |
-| Vehicle position staleness | ≤ 30 s | 15 s server-side poll + 15 s client-side poll |
-| GTFS-RT processing | ≤ 5 s | Protobuf decode + Redis pipeline write |
-| Concurrent users | 500 | NGINX rate limiting; Redis cache absorbs read load |
+| Metric                     | Target           | Mechanism                                          |
+| -------------------------- | ---------------- | -------------------------------------------------- |
+| API p95 latency            | ≤ 200 ms         | Redis cache-aside; PostGIS GiST index              |
+| Frontend initial load      | ≤ 3 s            | Next.js code splitting; MUI named imports          |
+| Initial JS chunk           | ≤ 150 KB gzipped | `next/dynamic` for Leaflet; named MUI imports      |
+| Vehicle position staleness | ≤ 30 s           | 15 s server-side poll + 15 s client-side poll      |
+| GTFS-RT processing         | ≤ 5 s            | Protobuf decode + Redis pipeline write             |
+| Concurrent users           | 500              | NGINX rate limiting; Redis cache absorbs read load |

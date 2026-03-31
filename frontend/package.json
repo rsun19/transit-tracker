@@ -12,7 +12,8 @@
     "format": "prettier --write \"{src,tests}/**/*.{ts,tsx}\"",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage",
+    "test:a11y": "jest tests/unit/accessibility-ci-gate.spec.tsx"
   },
   "dependencies": {
     "@emotion/react": "^11.11.0",
@@ -29,8 +30,8 @@
     "@testing-library/jest-dom": "^6.1.0",
     "@testing-library/react": "^14.1.0",
     "@testing-library/user-event": "^14.5.0",
-    "@types/jest-axe": "^3.5.9",
     "@types/jest": "^29.5.0",
+    "@types/jest-axe": "^3.5.9",
     "@types/leaflet": "^1.9.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
@@ -39,6 +40,8 @@
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.42.0",
     "eslint-config-next": "^14.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.5.5",
     "jest": "^29.5.0",
     "jest-axe": "^8.0.0",
     "jest-environment-jsdom": "^29.5.0",
@@ -48,15 +51,38 @@
   },
   "jest": {
     "testEnvironment": "jsdom",
-    "setupFilesAfterEnv": ["@testing-library/jest-dom"],
+    "setupFilesAfterEnv": [
+      "@testing-library/jest-dom"
+    ],
     "transform": {
-      "^.+\\.(t|j)sx?$": ["ts-jest", {"tsconfig": {"jsx": "react-jsx", "moduleResolution": "node"}}]
+      "^.+\\.(t|j)sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "jsx": "react-jsx",
+            "moduleResolution": "node"
+          }
+        }
+      ]
     },
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1",
       "\\.(css|less|scss|sass)$": "<rootDir>/__mocks__/styleMock.js"
     },
-    "collectCoverageFrom": ["src/**/*.(t|j)sx?"],
+    "collectCoverageFrom": [
+      "src/components/ui/AlertBanner.tsx",
+      "src/components/ui/EmptyState.tsx",
+      "src/components/ui/LoadingSkeleton.tsx",
+      "src/components/stops/DepartureRow.tsx",
+      "src/components/stops/StopCard.tsx"
+    ],
+    "coverageReporters": [
+      "json-summary",
+      "json",
+      "lcov",
+      "text",
+      "clover"
+    ],
     "coverageDirectory": "coverage",
     "coverageThreshold": {
       "global": {

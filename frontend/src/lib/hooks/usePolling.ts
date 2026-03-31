@@ -7,10 +7,7 @@ export interface PollingState<T> {
   lastUpdatedAt: Date | null;
 }
 
-export function usePolling<T>(
-  intervalMs: number,
-  fetcher: () => Promise<T>,
-): PollingState<T> {
+export function usePolling<T>(intervalMs: number, fetcher: () => Promise<T>): PollingState<T> {
   const [state, setState] = useState<PollingState<T>>({
     data: null,
     error: null,

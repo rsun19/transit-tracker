@@ -48,31 +48,59 @@ docker-compose -f docker-compose.dev.yml up --build
 
 See [docs/development.md](docs/development.md) for the full setup guide, dev workflow, and troubleshooting.
 
+### Root Quality Gates
+
+Run the full CI-equivalent suite locally from repository root:
+
+```bash
+npm run lint
+npm run format:check
+npm run test:unit
+npm run test:integration
+npm run test:contract
+npm run test:a11y
+npm run test:performance
+npm run test:e2e
+```
+
+Interactive Cypress workflow:
+
+```bash
+npm run dev
+npm run test:e2e:open
+```
+
+Single entrypoint for all constitution-automatable gates:
+
+```bash
+npm test
+```
+
 ---
 
 ## Documentation
 
-| Doc | Contents |
-|-----|----------|
-| [docs/architecture.md](docs/architecture.md) | System design, service topology, data flow, tech stack |
+| Doc                                            | Contents                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| [docs/architecture.md](docs/architecture.md)   | System design, service topology, data flow, tech stack        |
 | [docs/api-reference.md](docs/api-reference.md) | Full REST API endpoint reference with request/response shapes |
-| [docs/data-model.md](docs/data-model.md) | PostgreSQL schema, Redis key design, entity relationships |
-| [docs/configuration.md](docs/configuration.md) | Environment variables, agency config, NGINX/Docker tuning |
-| [docs/development.md](docs/development.md) | Local setup, hot-reload workflow, testing, troubleshooting |
+| [docs/data-model.md](docs/data-model.md)       | PostgreSQL schema, Redis key design, entity relationships     |
+| [docs/configuration.md](docs/configuration.md) | Environment variables, agency config, NGINX/Docker tuning     |
+| [docs/development.md](docs/development.md)     | Local setup, hot-reload workflow, testing, troubleshooting    |
 
 ---
 
 ## Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, MUI v6, react-leaflet, TypeScript |
-| Backend API | NestJS 10, TypeORM 0.3, TypeScript |
+| Layer            | Technology                                            |
+| ---------------- | ----------------------------------------------------- |
+| Frontend         | Next.js 14, MUI v6, react-leaflet, TypeScript         |
+| Backend API      | NestJS 10, TypeORM 0.3, TypeScript                    |
 | Ingestion worker | NestJS standalone, csv-parser, gtfs-realtime-bindings |
-| Database | PostgreSQL 16 + PostGIS 3.4 |
-| Cache | Redis 7 |
-| Proxy | NGINX 1.27 (rate limiting, routing) |
-| Containers | Docker Compose (6-service stack) |
+| Database         | PostgreSQL 16 + PostGIS 3.4                           |
+| Cache            | Redis 7                                               |
+| Proxy            | NGINX 1.27 (rate limiting, routing)                   |
+| Containers       | Docker Compose (6-service stack)                      |
 
 ---
 
