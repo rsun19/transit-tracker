@@ -37,6 +37,8 @@ Thumbs.db
 
 # Testing
 coverage/
+cypress/videos/
+cypress/screenshots/
 
 # Docker
 docker-compose.override.yml
