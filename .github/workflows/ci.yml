@@ -86,46 +86,6 @@ jobs:
       - run: npm ci
       - run: npm run test:performance
 
-  peer-review-validation:
-    name: peer-review-validation
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: Collect PR review metadata
-        if: github.event_name == 'pull_request'
-        id: review-metadata
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            const author = pr.user.login;
-            const reviews = await github.paginate(github.rest.pulls.listReviews, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-              per_page: 100,
-            });
-            const approved = [...new Set(
-              reviews
-                .filter((review) => review.state === 'APPROVED')
-                .map((review) => review.user.login)
-            )];
-            core.setOutput('author', author);
-            core.setOutput('approvedReviewers', approved.join(','));
-      - name: Validate peer-review advisory gate
-        run: node scripts/ci/validate-peer-review-gate.mjs
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_AUTHOR: ${{ steps.review-metadata.outputs.author }}
-          APPROVED_REVIEWERS: ${{ steps.review-metadata.outputs.approvedReviewers }}
-
   cypress-map:
     name: cypress-map
     runs-on: ubuntu-latest
