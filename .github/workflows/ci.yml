@@ -21,6 +21,20 @@ jobs:
       - run: npm ci --prefix frontend
       - run: npm run lint
 
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run typecheck
+
   unit:
     name: unit
     runs-on: ubuntu-latest

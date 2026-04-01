@@ -34,6 +34,13 @@ export interface GeoJsonLineString {
   coordinates: [number, number][];
 }
 
+export interface StopRouteRef {
+  routeId: string;
+  shortName: string | null;
+  longName: string | null;
+  routeType: number;
+}
+
 export interface Stop {
   id: string;
   stopId: string;
@@ -44,6 +51,7 @@ export interface Stop {
   wheelchairBoarding: number | null;
   distanceMetres?: number;
   nextDeparture?: Departure | null;
+  routes?: StopRouteRef[];
 }
 
 export interface Departure {

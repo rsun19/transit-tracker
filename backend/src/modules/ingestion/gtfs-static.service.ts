@@ -11,7 +11,7 @@ import { Extract } from 'unzipper';
 import csvParser from 'csv-parser';
 import { from as copyFrom } from 'pg-copy-streams';
 import type { Pool, PoolClient } from 'pg';
-import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service';
+import { AgenciesService, ResolvedAgency } from '@/modules/agencies/agencies.service';
 
 // Escape a value for PostgreSQL COPY CSV format (NULL → empty, strings quoted if needed)
 function csvField(v: string | number | null | undefined): string {

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AlertsController } from './alerts.controller';
-import { CacheModule } from '../cache/cache.module';
-import { AgenciesModule } from '../agencies/agencies.module';
+import { CacheModule } from '@/modules/cache/cache.module';
+import { AgenciesModule } from '@/modules/agencies/agencies.module';
 
 @Module({
   imports: [CacheModule, AgenciesModule],

@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { CacheService } from '../cache/cache.service';
-import { AgenciesService } from '../agencies/agencies.service';
+import { CacheService } from '@/modules/cache/cache.service';
+import { AgenciesService } from '@/modules/agencies/agencies.service';
 
 interface Alert {
   alertId: string;
