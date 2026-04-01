@@ -80,6 +80,9 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/$1"
+    },
     "collectCoverageFrom": [
       "modules/cache/cache.service.ts"
     ],

@@ -3,8 +3,8 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Stop } from './entities/stop.entity';
 import { StopTime } from './entities/stop-time.entity';
-import { Route } from '../routes/entities/route.entity';
-import { CacheService } from '../cache/cache.service';
+import { Route } from '@/modules/routes/entities/route.entity';
+import { CacheService } from '@/modules/cache/cache.service';
 import {
   API_CACHE_DEPARTURES_TTL_S,
   API_CACHE_NEARBY_TTL_S,

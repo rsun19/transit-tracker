@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { CacheService } from '../cache/cache.service';
+import { CacheService } from '@/modules/cache/cache.service';
 import { API_CACHE_ROUTES_TTL_S } from '@/common/constants';
 
 export interface TripStopResponse {

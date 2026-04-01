@@ -21,7 +21,7 @@
         "allowSameFolder": true,
         "rootDir": "src",
         "prefix": "@",
-        "allowedDepth": 1
+        "allowedDepth": 0
       }
     ]
   },

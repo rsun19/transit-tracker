@@ -3,8 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import fetch from 'node-fetch';
 import { transit_realtime } from 'gtfs-realtime-bindings';
-import { CacheService } from '../cache/cache.service';
-import { AgenciesService, ResolvedAgency } from '../agencies/agencies.service';
+import { CacheService } from '@/modules/cache/cache.service';
+import { AgenciesService, ResolvedAgency } from '@/modules/agencies/agencies.service';
 import { VEHICLE_CACHE_TTL_S, ALERTS_CACHE_TTL_S } from '@/common/constants';
 
 interface VehiclePosition {

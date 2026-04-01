@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, Interval } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
-import { AgenciesService } from '../agencies/agencies.service';
+import { AgenciesService } from '@/modules/agencies/agencies.service';
 import { GtfsStaticService } from './gtfs-static.service';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
 import { REALTIME_POLL_INTERVAL_MS } from '@/common/constants';
