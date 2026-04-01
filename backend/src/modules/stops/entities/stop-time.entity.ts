@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-import { Agency } from '../../agencies/entities/agency.entity';
+import { Agency } from '@/modules/agencies/entities/agency.entity';
 
 @Entity('stop_times')
 @Index(['agencyId', 'tripId', 'stopSequence'])

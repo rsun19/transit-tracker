@@ -1,6 +1,6 @@
 import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
 import { StopsService } from './stops.service';
-import { NEARBY_MAX_RADIUS_M } from '../../common/constants';
+import { NEARBY_MAX_RADIUS_M } from '@/common/constants';
 
 @Controller('api/v1/stops')
 export class StopsController {

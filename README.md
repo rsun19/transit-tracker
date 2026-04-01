@@ -54,6 +54,7 @@ Run the full CI-equivalent suite locally from repository root:
 
 ```bash
 npm run lint
+npm run typecheck
 npm run format:check
 npm run test:unit
 npm run test:integration
@@ -62,6 +63,8 @@ npm run test:a11y
 npm run test:performance
 npm run test:e2e
 ```
+
+`npm run typecheck` is the canonical repository-wide TypeScript diagnostics command used both locally and in CI.
 
 Interactive Cypress workflow:
 

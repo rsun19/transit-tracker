@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
-import { API_CACHE_ROUTES_TTL_S } from '../../common/constants';
+import { API_CACHE_ROUTES_TTL_S } from '@/common/constants';
 
 export interface TripStopResponse {
   sequence: number;
@@ -56,8 +56,8 @@ export class TripsService {
               s.stop_code,
               ST_Y(s.location::geometry) AS lat,
               ST_X(s.location::geometry) AS lon,
-              (CURRENT_DATE + st.arrival_time)::text AS arrival_time,
-              (CURRENT_DATE + st.departure_time)::text AS departure_time
+              ((CURRENT_DATE + st.arrival_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC')::text AS arrival_time,
+              ((CURRENT_DATE + st.departure_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC')::text AS departure_time
        FROM trips t
        JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
        JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = t.agency_id

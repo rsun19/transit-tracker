@@ -4,11 +4,7 @@ import { Repository } from 'typeorm';
 import { Route } from './entities/route.entity';
 import { Shape } from '../ingestion/entities/shape.entity';
 import { CacheService } from '../cache/cache.service';
-import {
-  API_CACHE_ROUTES_TTL_S,
-  DEFAULT_SEARCH_LIMIT,
-  MAX_SEARCH_LIMIT,
-} from '../../common/constants';
+import { API_CACHE_ROUTES_TTL_S, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '@/common/constants';
 
 export interface GeoJsonLineString {
   type: 'LineString';

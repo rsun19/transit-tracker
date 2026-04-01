@@ -118,6 +118,7 @@ Run these commands from repository root to mirror CI gate behavior:
 
 ```sh
 npm run lint
+npm run typecheck
 npm run format:check
 npm run test:unit
 npm run test:integration
@@ -126,6 +127,16 @@ npm run test:a11y
 npm run test:performance
 npm run test:e2e
 ```
+
+### Repository-wide alias policy
+
+- Both `backend` and `frontend` are in scope for alias-policy validation.
+- Use `@/` imports for module paths covered by each project's `tsconfig.json` alias mapping.
+- Deep relative imports (`../../` and deeper) are treated as alias-policy violations in lint checks.
+
+Expected behavior:
+
+- `npm run typecheck` runs backend and frontend type diagnostics and reports all project errors before failing.
 
 Interactive Cypress debugging from root:
 
@@ -139,6 +150,7 @@ npm run test:e2e:open
 Configure branch protection to require the following checks:
 
 - `lint`
+- `typecheck`
 - `unit`
 - `integration`
 - `contract`

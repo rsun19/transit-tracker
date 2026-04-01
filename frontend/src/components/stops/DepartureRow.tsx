@@ -13,6 +13,8 @@ interface DepartureRowProps {
 
 function formatTime(isoString: string): string {
   try {
+    // Backend sends ISO timestamps in UTC (converted from agency's timezone).
+    // toLocaleTimeString() automatically converts to the browser's local timezone.
     return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch {
     return isoString;

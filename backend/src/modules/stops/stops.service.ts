@@ -12,7 +12,7 @@ import {
   MAX_SEARCH_LIMIT,
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
-} from '../../common/constants';
+} from '@/common/constants';
 
 export interface StopResponse {
   id: string;
@@ -99,12 +99,9 @@ export class StopsService {
     if (cached)
       return JSON.parse(cached) as { data: DepartureResponse[]; stopId: string; agencyKey: string };
 
-    // Get today's day of week to look up active service_ids
-    const now = new Date();
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const dayCol = dayNames[now.getDay()];
-    const todayDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-
+    // All date/time filtering is performed in the agency's own timezone so that
+    // "today" and "now" are always consistent with the transit service day —
+    // regardless of where the DB server or the client is located.
     const rows = await this.dataSource.query<
       Array<{
         trip_id: string;
@@ -113,10 +110,12 @@ export class StopsService {
         long_name: string | null;
         trip_headsign: string | null;
         departure_time: string;
+        agency_timezone: string;
       }>
     >(
       `SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-              (CURRENT_DATE + st.departure_time)::text AS departure_time
+              ((NOW() AT TIME ZONE a.timezone)::date + st.departure_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC' AS departure_time,
+              a.timezone AS agency_timezone
        FROM stop_times st
        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
@@ -124,13 +123,21 @@ export class StopsService {
        JOIN agencies a ON a."agencyId" = st.agency_id
        WHERE st.stop_id = $1
          AND a.agency_key = $2
-         AND sc.${dayCol} = true
-         AND sc.start_date <= $3
-         AND sc.end_date >= $3
-         AND (CURRENT_DATE + st.departure_time) >= NOW()
+         AND CASE EXTRACT(DOW FROM NOW() AT TIME ZONE a.timezone)::int
+               WHEN 0 THEN sc.sunday
+               WHEN 1 THEN sc.monday
+               WHEN 2 THEN sc.tuesday
+               WHEN 3 THEN sc.wednesday
+               WHEN 4 THEN sc.thursday
+               WHEN 5 THEN sc.friday
+               WHEN 6 THEN sc.saturday
+             END = true
+         AND sc.start_date <= (NOW() AT TIME ZONE a.timezone)::date
+         AND sc.end_date   >= (NOW() AT TIME ZONE a.timezone)::date
+         AND ((NOW() AT TIME ZONE a.timezone)::date + st.departure_time)::timestamp AT TIME ZONE a.timezone >= NOW()
        ORDER BY st.departure_time ASC
-       LIMIT $4`,
-      [stopId, agencyKey, todayDate, Math.min(limit, MAX_SEARCH_LIMIT)],
+       LIMIT $3`,
+      [stopId, agencyKey, Math.min(limit, MAX_SEARCH_LIMIT)],
     );
 
     const data: DepartureResponse[] = rows.map((row) => ({

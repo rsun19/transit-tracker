@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   Unique,
 } from 'typeorm';
-import { Agency } from '../../agencies/entities/agency.entity';
+import { Agency } from '@/modules/agencies/entities/agency.entity';
 
 @Entity('trips')
 @Unique(['agencyId', 'tripId'])
