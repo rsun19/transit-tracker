@@ -5,6 +5,8 @@ import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
 import type { Stop } from '@/lib/api-client';
 
 interface StopCardProps {
@@ -26,6 +28,18 @@ export function StopCard({ stop, onClick }: StopCardProps) {
                 <Typography variant="body2" color="text.secondary">
                   Stop #{stop.stopCode}
                 </Typography>
+              )}
+              {stop.routes && stop.routes.length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                  {stop.routes.map((r) => (
+                    <Chip
+                      key={r.routeId}
+                      label={r.shortName ?? r.longName ?? r.routeId}
+                      size="small"
+                      variant="outlined"
+                    />
+                  ))}
+                </Stack>
               )}
             </Box>
             {stop.distanceMetres !== undefined && (

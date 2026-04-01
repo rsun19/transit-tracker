@@ -10,6 +10,8 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import InputAdornment from '@mui/material/InputAdornment';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
 import SearchIcon from '@mui/icons-material/Search';
 import { fetchStops, type Stop } from '@/lib/api-client';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
@@ -108,7 +110,23 @@ export default function StopsPage() {
               >
                 <ListItemText
                   primary={stop.stopName}
-                  secondary={stop.stopCode ? `Stop #${stop.stopCode}` : stop.stopId}
+                  secondary={
+                    <Stack component="span" direction="column" spacing={0.5}>
+                      <span>{stop.stopCode ? `Stop #${stop.stopCode}` : stop.stopId}</span>
+                      {stop.routes && stop.routes.length > 0 && (
+                        <Stack component="span" direction="row" spacing={0.5} flexWrap="wrap">
+                          {stop.routes.map((r) => (
+                            <Chip
+                              key={r.routeId}
+                              label={r.shortName ?? r.longName ?? r.routeId}
+                              size="small"
+                              variant="outlined"
+                            />
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
+                  }
                 />
               </ListItemButton>
             </ListItem>
