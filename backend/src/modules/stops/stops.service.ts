@@ -102,6 +102,11 @@ export class StopsService {
     // All date/time filtering is performed in the agency's own timezone so that
     // "today" and "now" are always consistent with the transit service day —
     // regardless of where the DB server or the client is located.
+    //
+    // We evaluate two candidate service dates — today and yesterday (in the
+    // agency's timezone) — so that GTFS post-midnight trips (e.g.
+    // departure_time = '25:30:00') scheduled under yesterday's service day but
+    // whose UTC instant is still in the future are included in results.
     const rows = await this.dataSource.query<
       Array<{
         trip_id: string;
@@ -114,16 +119,21 @@ export class StopsService {
       }>
     >(
       `SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-              ((NOW() AT TIME ZONE a.timezone)::date + st.departure_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC' AS departure_time,
+              ((cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC')::text AS departure_time,
               a.timezone AS agency_timezone
        FROM stop_times st
        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
        JOIN service_calendars sc ON sc.service_id = t.service_id AND sc.agency_id = t.agency_id
        JOIN agencies a ON a."agencyId" = st.agency_id
+       CROSS JOIN LATERAL (
+         SELECT (NOW() AT TIME ZONE a.timezone)::date AS candidate_date
+         UNION ALL
+         SELECT (NOW() AT TIME ZONE a.timezone)::date - INTERVAL '1 day'
+       ) AS cd
        WHERE st.stop_id = $1
          AND a.agency_key = $2
-         AND CASE EXTRACT(DOW FROM NOW() AT TIME ZONE a.timezone)::int
+         AND CASE EXTRACT(DOW FROM cd.candidate_date)::int
                WHEN 0 THEN sc.sunday
                WHEN 1 THEN sc.monday
                WHEN 2 THEN sc.tuesday
@@ -132,10 +142,10 @@ export class StopsService {
                WHEN 5 THEN sc.friday
                WHEN 6 THEN sc.saturday
              END = true
-         AND sc.start_date <= (NOW() AT TIME ZONE a.timezone)::date
-         AND sc.end_date   >= (NOW() AT TIME ZONE a.timezone)::date
-         AND ((NOW() AT TIME ZONE a.timezone)::date + st.departure_time)::timestamp AT TIME ZONE a.timezone >= NOW()
-       ORDER BY st.departure_time ASC
+         AND sc.start_date <= cd.candidate_date
+         AND sc.end_date   >= cd.candidate_date
+         AND (cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone >= NOW()
+       ORDER BY (cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone ASC
        LIMIT $3`,
       [stopId, agencyKey, Math.min(limit, MAX_SEARCH_LIMIT)],
     );
