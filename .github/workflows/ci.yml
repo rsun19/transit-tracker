@@ -271,6 +271,9 @@ jobs:
   deploy:
     name: deploy
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-main
+      cancel-in-progress: true
     needs:
       - lint
       - typecheck
@@ -368,14 +371,14 @@ jobs:
 
             docker compose pull
 
-            # Bootstrap TLS on first deploy: cert files won't exist yet, so run
-            # certbot in standalone mode (its own HTTP server) before nginx starts.
-            # On subsequent deploys the cert already exists and this is skipped.
-            if [ ! -f /etc/letsencrypt/live/www.trackthemetro.com/fullchain.pem ]; then
+            # Bootstrap TLS on first deploy: check for the cert inside the
+            # certbot_certs volume (not the host filesystem) then run certbot in
+            # standalone mode before nginx starts. Skipped on subsequent deploys.
+            if ! docker compose run --rm --entrypoint /bin/sh certbot -c "test -f /etc/letsencrypt/live/www.trackthemetro.com/fullchain.pem" >/dev/null 2>&1; then
               echo "No cert found — bootstrapping Let's Encrypt certificate..."
-              docker compose run --rm certbot certonly \
+              docker compose run --rm --publish 80:80 --entrypoint certbot certbot certonly \
                 --standalone \
-                -d trackthemetro.com -d www.trackthemetro.com \
+                -d www.trackthemetro.com -d trackthemetro.com \
                 --email "$CERTBOT_EMAIL" \
                 --agree-tos --no-eff-email
             fi

@@ -42,7 +42,6 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
       NODE_ENV: production
@@ -66,7 +65,6 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
       WORKER_FILE_LIVENESS_PATH: /tmp/worker-alive
@@ -130,7 +128,8 @@ services:
     volumes:
       - certbot_certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
-    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+    entrypoint: ['/bin/sh']
+    command: ['-c', 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $$!; done']
     restart: unless-stopped
 
 volumes:
