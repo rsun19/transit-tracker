@@ -37,7 +37,7 @@ describe('Stop departures page', () => {
       cy.wait(['@departures', '@alerts']);
     });
 
-    it('shows Outbound and Inbound tables side-by-side', () => {
+    it('shows Outbound and Inbound tables stacked vertically', () => {
       cy.contains('Outbound').should('be.visible');
       cy.contains('Inbound').should('be.visible');
     });

@@ -161,11 +161,51 @@ GtfsRealtimeService.poll(agency)
   2. FeedMessage.decode(buffer)         ← gtfs-realtime-bindings
   3. Build Set<string> of valid trip IDs from DB
   4. Filter VehiclePosition entities → discard unknown trip_ids (WARN)
-  5. Redis pipeline:
-       SET vehicles:{key} JSON(positions) EX 30
-       SET alerts:{key}   JSON(alerts)    EX 30
-  6. EXEC pipeline
+  5. For each TripUpdate entity:
+       a. trip_id in valid set  → scheduled trip: record delay (first stop_time_update)
+                                  stored as  trip_updates:{agencyKey}  HSET tripId → delaySeconds
+       b. trip_id not in valid set → ADDED / unscheduled trip: collect absolute
+                                  stop departure timestamps per stop_id
+                                  stored as  added_trips:{agencyKey}   HSET tripId → JSON
+  6. Redis pipeline:
+       SET  vehicles:{key}     JSON(positions)   EX 30
+       SET  alerts:{key}       JSON(alerts)      EX 30
+       HSET trip_updates:{key} {tripId: delay …} EX 90
+       HSET added_trips:{key}  {tripId: data  …} EX 90
+  7. EXEC pipeline
 ```
+
+### ADDED Trip Reconciliation (Stop Departures)
+
+Many agencies (including MBTA) publish realtime predictions for their scheduled trips
+under opaque `ADDED-xxxx` trip IDs rather than the static GTFS `trip_id`. Naively
+appending ADDED trips as extra rows causes each train to appear twice — once from the
+static schedule and once from the realtime feed.
+
+`StopsService.getDepartures()` reconciles ADDED trips against the scheduled departures
+using a nearest-neighbour match:
+
+```
+For each ADDED trip at this stop (sorted by departure time ascending):
+  1. Find the closest unmatched scheduled trip with the same routeId AND directionId
+     whose scheduled departure is within RECONCILE_WINDOW (5 min) of the ADDED time.
+  2a. Match found →
+        realtimeDelaySeconds = addedTime − scheduledTime   (negative = running early)
+        hasRealtime          = true
+        Scheduled slot is marked "consumed" (one-to-one mapping)
+  2b. No match (genuinely extra service, e.g. shuttle or unplanned trip) →
+        Append as a new departure row with hasRealtime = true
+```
+
+**Why sort ascending first?** On high-frequency routes (e.g. 2-min headways) processing
+order matters. If an ADDED trip at T+1:45 is processed before one at T+0:55, the first
+might "steal" the T+2:00 scheduled slot that belongs to the second, causing a cascade of
+wrong matches. Ascending order ensures each ADDED trip claims its closest _earlier_ slot
+before later trips are considered.
+
+**Headsign fallback:** Because GTFS-RT ADDED trips never carry a `trip_headsign`, the
+reconciler looks up the representative headsign for the `(routeId, directionId)` pair
+from the static schedule and applies it to any unmatched ADDED row.
 
 ### API Request (cache-aside)
 

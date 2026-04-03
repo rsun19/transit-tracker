@@ -45,6 +45,88 @@ export interface DepartureResponse {
   directionId: number | null;
 }
 
+export interface AddedTripEntry {
+  trip: {
+    tripId: string;
+    routeId: string;
+    directionId: number | null;
+    headsign: string | null;
+  };
+  departureTime: number; // Unix seconds
+  routeShortName: string | null;
+  routeLongName: string | null;
+  headsignFallback: string | null;
+}
+
+/** Maximum window (ms) within which an ADDED trip is matched to a scheduled slot. */
+export const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Reconcile ADDED/unscheduled realtime trips against a list of scheduled departures.
+ *
+ * Many agencies (including MBTA) publish realtime predictions for scheduled trips
+ * under opaque ADDED-xxx trip IDs. This function:
+ *  1. Sorts ADDED entries by departure time ascending so high-frequency routes are
+ *     matched correctly (earlier trains claim their slot first).
+ *  2. For each ADDED entry, finds the nearest unmatched scheduled trip for the same
+ *     routeId + directionId within RECONCILE_WINDOW_MS.
+ *  3a. Match found → merges realtime delay into the scheduled row (mutates in place).
+ *  3b. No match → appends the ADDED entry as genuinely new extra service.
+ *
+ * Mutates `departures` in place and returns it for convenience.
+ */
+export function reconcileAddedTrips(
+  departures: DepartureResponse[],
+  addedEntries: AddedTripEntry[],
+): DepartureResponse[] {
+  const sorted = [...addedEntries].sort((a, b) => a.departureTime - b.departureTime);
+  const reconciledIndices = new Set<number>();
+
+  for (const entry of sorted) {
+    const addedMs = entry.departureTime * 1000;
+
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    for (let i = 0; i < departures.length; i++) {
+      if (reconciledIndices.has(i)) continue;
+      const dep = departures[i];
+      if (dep.routeId !== entry.trip.routeId) continue;
+      if (dep.directionId !== entry.trip.directionId) continue;
+      const diff = Math.abs(addedMs - new Date(dep.scheduledDeparture).getTime());
+      if (diff < bestDiff && diff <= RECONCILE_WINDOW_MS) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      reconciledIndices.add(bestIdx);
+      const schedMs = new Date(departures[bestIdx].scheduledDeparture).getTime();
+      departures[bestIdx].realtimeDelaySeconds = Math.round((addedMs - schedMs) / 1000);
+      departures[bestIdx].hasRealtime = true;
+      if (!departures[bestIdx].headsign) {
+        departures[bestIdx].headsign = entry.trip.headsign ?? entry.headsignFallback;
+      }
+    } else {
+      departures.push({
+        tripId: entry.trip.tripId,
+        routeId: entry.trip.routeId,
+        routeShortName: entry.routeShortName,
+        routeLongName: entry.routeLongName,
+        headsign: entry.trip.headsign ?? entry.headsignFallback,
+        scheduledDeparture: new Date(addedMs).toISOString(),
+        realtimeDelaySeconds: 0,
+        hasRealtime: true,
+        directionId: entry.trip.directionId,
+      });
+      // Prevent subsequent ADDED entries from matching this newly-pushed row.
+      reconciledIndices.add(departures.length - 1);
+    }
+  }
+
+  return departures;
+}
+
 @Injectable()
 export class StopsService {
   constructor(
@@ -373,28 +455,42 @@ export class StopsService {
         }
 
         if (pendingAdded.length > 0) {
-          const routeRows = await this.dataSource.query<
-            Array<{ route_id: string; short_name: string | null; long_name: string | null }>
-          >(
-            `SELECT route_id, short_name, long_name FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
-            [agencyId, [...addedRouteIds]],
-          );
-          const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
+          const addedRouteIdList = [...addedRouteIds];
 
-          for (const { trip, departureTime } of pendingAdded) {
-            const route = routeMap.get(trip.routeId);
-            data.push({
-              tripId: trip.tripId,
-              routeId: trip.routeId,
-              routeShortName: route?.short_name ?? null,
-              routeLongName: route?.long_name ?? null,
-              headsign: trip.headsign,
-              scheduledDeparture: new Date(departureTime * 1000).toISOString(),
-              realtimeDelaySeconds: 0,
-              hasRealtime: true,
-              directionId: trip.directionId,
-            });
-          }
+          // Fetch route metadata and representative headsigns per (route, direction)
+          // for ADDED trips — the GTFS-RT feed never includes headsign on added trips.
+          const [routeRows, headsignRows] = await Promise.all([
+            this.dataSource.query<
+              Array<{ route_id: string; short_name: string | null; long_name: string | null }>
+            >(
+              `SELECT route_id, short_name, long_name FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
+              [agencyId, addedRouteIdList],
+            ),
+            this.dataSource.query<
+              Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
+            >(
+              `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
+               FROM trips
+               WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
+               ORDER BY route_id, direction_id, trip_headsign`,
+              [agencyId, addedRouteIdList],
+            ),
+          ]);
+
+          const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
+          const headsignMap = new Map(
+            headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
+          );
+
+          const entries: AddedTripEntry[] = pendingAdded.map(({ trip, departureTime }) => ({
+            trip,
+            departureTime,
+            routeShortName: routeMap.get(trip.routeId)?.short_name ?? null,
+            routeLongName: routeMap.get(trip.routeId)?.long_name ?? null,
+            headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
+          }));
+
+          reconcileAddedTrips(data, entries);
         }
       }
     } catch {

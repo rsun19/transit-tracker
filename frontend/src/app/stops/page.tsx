@@ -120,21 +120,16 @@ export default function StopsPage() {
                       <span>{stop.stopCode ? `Stop #${stop.stopCode}` : stop.stopId}</span>
                       {stop.routes && stop.routes.length > 0 && (
                         <Stack component="span" direction="row" spacing={0.5} flexWrap="wrap">
-                          {Array.from(
-                            new Map(
-                              stop.routes.map((r) => {
-                                const label = r.shortName || r.longName || r.routeId;
-                                return [label, r];
-                              }),
-                            ).values(),
-                          ).map((r) => (
-                            <Chip
-                              key={r.routeId}
-                              label={r.shortName || r.longName || r.routeId}
-                              size="small"
-                              variant="outlined"
-                            />
-                          ))}
+                          {Array.from(new Map(stop.routes.map((r) => [r.routeId, r])).values()).map(
+                            (r) => (
+                              <Chip
+                                key={r.routeId}
+                                label={r.shortName || r.longName || r.routeId}
+                                size="small"
+                                variant="outlined"
+                              />
+                            ),
+                          )}
                         </Stack>
                       )}
                     </Stack>
