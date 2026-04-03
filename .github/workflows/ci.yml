@@ -267,3 +267,118 @@ jobs:
             cypress/videos/**
             cypress/screenshots/**
             frontend-dev.log
+
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - typecheck
+      - unit
+      - integration
+      - contract
+      - accessibility
+      - performance
+      - cypress-map
+      - cypress-stops
+      - cypress-routes
+      - cypress-core-smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.worker
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-worker:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          build-args: BACKEND_URL=http://backend:3000
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Copy deployment files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.yml,nginx.conf
+          target: /opt/transit-tracker
+
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_TAG: ${{ github.sha }}
+          REGISTRY_OWNER: ${{ github.repository_owner }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DEPLOY_TAG,REGISTRY_OWNER,CERTBOT_EMAIL
+          script: |
+            cd /opt/transit-tracker
+
+            # Update image tag and registry owner in .env
+            if grep -q "^IMAGE_TAG=" .env; then
+              sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=$DEPLOY_TAG|" .env
+            else
+              echo "IMAGE_TAG=$DEPLOY_TAG" >> .env
+            fi
+            if grep -q "^REGISTRY_OWNER=" .env; then
+              sed -i "s|^REGISTRY_OWNER=.*|REGISTRY_OWNER=$REGISTRY_OWNER|" .env
+            else
+              echo "REGISTRY_OWNER=$REGISTRY_OWNER" >> .env
+            fi
+
+            docker compose pull
+
+            # Bootstrap TLS on first deploy: cert files won't exist yet, so run
+            # certbot in standalone mode (its own HTTP server) before nginx starts.
+            # On subsequent deploys the cert already exists and this is skipped.
+            if [ ! -f /etc/letsencrypt/live/www.trackthemetro.com/fullchain.pem ]; then
+              echo "No cert found — bootstrapping Let's Encrypt certificate..."
+              docker compose run --rm certbot certonly \
+                --standalone \
+                -d trackthemetro.com -d www.trackthemetro.com \
+                --email "$CERTBOT_EMAIL" \
+                --agree-tos --no-eff-email
+            fi
+
+            docker compose up -d --remove-orphans
+            docker image prune -f
