@@ -4,7 +4,6 @@ import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
-import Box from '@mui/material/Box';
 import type { Departure } from '@/lib/api-client';
 
 interface DepartureRowProps {
@@ -23,40 +22,54 @@ function formatTime(isoString: string): string {
 }
 
 export function DepartureRow({ departure }: DepartureRowProps) {
-  const hasDelay =
-    departure.hasRealtime &&
-    departure.realtimeDelaySeconds !== null &&
-    departure.realtimeDelaySeconds !== 0;
+  const delay = departure.realtimeDelaySeconds;
+  const delayMinutes = delay !== null ? Math.round(delay / 60) : 0;
+
+  const isLate = departure.hasRealtime && delay !== null && delayMinutes > 0;
+  const isEarly = departure.hasRealtime && delay !== null && delayMinutes < 0;
+  const isOnTime = departure.hasRealtime && delay !== null && delayMinutes === 0;
+
+  // Show effective departure time (scheduled + delay) when realtime data is available
+  const effectiveIso =
+    departure.hasRealtime && delay !== null
+      ? new Date(new Date(departure.scheduledDeparture).getTime() + delay * 1000).toISOString()
+      : departure.scheduledDeparture;
+
+  const timeColor = isLate
+    ? 'error.main'
+    : isEarly
+      ? 'warning.main'
+      : isOnTime
+        ? 'success.main'
+        : 'text.primary';
+
+  // Prefer short name, fall back to long name (e.g. "Red Line"), then route ID
+  const routeLabel = departure.routeShortName || departure.routeLongName || departure.routeId;
 
   return (
     <TableRow hover>
       <TableCell>
-        <Chip
-          label={departure.routeShortName ?? departure.routeId}
-          size="small"
-          color="primary"
-          variant="outlined"
-        />
+        <Chip label={routeLabel} size="small" color="primary" variant="outlined" />
       </TableCell>
       <TableCell>
         <Typography variant="body2">{departure.headsign ?? '—'}</Typography>
       </TableCell>
       <TableCell>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2">{formatTime(departure.scheduledDeparture)}</Typography>
-          {hasDelay && (
-            <Chip
-              label={`+${Math.round((departure.realtimeDelaySeconds ?? 0) / 60)} min`}
-              size="small"
-              color="warning"
-            />
-          )}
-          {!departure.hasRealtime && (
-            <Typography variant="caption" color="text.secondary">
-              (scheduled)
-            </Typography>
-          )}
-        </Box>
+        <Typography variant="body2" sx={{ color: timeColor }}>
+          {formatTime(effectiveIso)}
+        </Typography>
+      </TableCell>
+      <TableCell>
+        {isLate && <Chip label={`+${delayMinutes} min`} size="small" color="error" />}
+        {isEarly && (
+          <Chip label={`${Math.abs(delayMinutes)} min early`} size="small" color="warning" />
+        )}
+        {isOnTime && <Chip label="On Time" size="small" color="success" variant="outlined" />}
+        {!departure.hasRealtime && (
+          <Typography variant="caption" color="text.secondary">
+            (scheduled)
+          </Typography>
+        )}
       </TableCell>
     </TableRow>
   );

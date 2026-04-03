@@ -7,7 +7,6 @@ import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Link from '@mui/material/Link';
-import Grid from '@mui/material/Grid';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableHead from '@mui/material/TableHead';
@@ -148,17 +147,13 @@ export default function StopDeparturesPage() {
       )}
 
       {!loading && !error && departures.length > 0 && isGrouped && (
-        <Grid container spacing={2}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {directionGroups.map(([dirId, deps]) => {
             const label =
               dirId !== null ? (DIRECTION_LABELS[dirId] ?? `Direction ${dirId}`) : 'All Departures';
-            return (
-              <Grid key={dirId ?? 'all'} item xs={12} md={6}>
-                <DepartureTable title={label} deps={deps} />
-              </Grid>
-            );
+            return <DepartureTable key={dirId ?? 'all'} title={label} deps={deps} />;
           })}
-        </Grid>
+        </Box>
       )}
     </Container>
   );

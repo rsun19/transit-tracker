@@ -20,10 +20,29 @@ const scheduledDeparture: Departure = {
   directionId: null,
 };
 
-const realtimeDeparture: Departure = {
+const onTimeDeparture: Departure = {
+  ...scheduledDeparture,
+  realtimeDelaySeconds: 0,
+  hasRealtime: true,
+};
+
+const lateDeparture: Departure = {
   ...scheduledDeparture,
   realtimeDelaySeconds: 180,
   hasRealtime: true,
+};
+
+const earlyDeparture: Departure = {
+  ...scheduledDeparture,
+  realtimeDelaySeconds: -120,
+  hasRealtime: true,
+};
+
+// Subway route with no short name (e.g. Red Line in MBTA GTFS)
+const subwayDeparture: Departure = {
+  ...scheduledDeparture,
+  routeShortName: '',
+  routeLongName: 'Red Line',
 };
 
 // DepartureRow must be rendered inside a table structure for valid HTML / axe
@@ -42,8 +61,26 @@ describe('DepartureRow accessibility', () => {
     expect(results).toHaveNoViolations();
   });
 
-  it('has no axe violations for real-time departure with delay', async () => {
-    const { container } = render(wrap(<DepartureRow departure={realtimeDeparture} />));
+  it('has no axe violations for on-time realtime departure', async () => {
+    const { container } = render(wrap(<DepartureRow departure={onTimeDeparture} />));
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has no axe violations for late realtime departure', async () => {
+    const { container } = render(wrap(<DepartureRow departure={lateDeparture} />));
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has no axe violations for early realtime departure', async () => {
+    const { container } = render(wrap(<DepartureRow departure={earlyDeparture} />));
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has no axe violations when routeShortName is empty (subway fallback to longName)', async () => {
+    const { container } = render(wrap(<DepartureRow departure={subwayDeparture} />));
     const results = await axe(container);
     expect(results).toHaveNoViolations();
   });

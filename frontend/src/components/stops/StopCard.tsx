@@ -31,10 +31,17 @@ export function StopCard({ stop, onClick }: StopCardProps) {
               )}
               {stop.routes && stop.routes.length > 0 && (
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
-                  {stop.routes.map((r) => (
+                  {Array.from(
+                    new Map(
+                      stop.routes.map((r) => {
+                        const label = r.shortName || r.longName || r.routeId;
+                        return [label, r];
+                      }),
+                    ).values(),
+                  ).map((r) => (
                     <Chip
                       key={r.routeId}
-                      label={r.shortName ?? r.longName ?? r.routeId}
+                      label={r.shortName || r.longName || r.routeId}
                       size="small"
                       variant="outlined"
                     />

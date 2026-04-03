@@ -10,6 +10,9 @@ export const VEHICLE_CACHE_TTL_S = 30;
 // Alerts cache TTL (seconds)
 export const ALERTS_CACHE_TTL_S = 30;
 
+// TripUpdate realtime delay cache TTL (seconds) — hash key per agency
+export const TRIP_UPDATE_CACHE_TTL_S = 30;
+
 // API response cache TTLs (seconds)
 export const API_CACHE_DEPARTURES_TTL_S = 20;
 export const API_CACHE_ROUTES_TTL_S = 300;

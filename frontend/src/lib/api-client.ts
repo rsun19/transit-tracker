@@ -1,7 +1,7 @@
 const API_BASE = '/api/v1';
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { signal });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `API error ${res.status}`);
@@ -146,18 +146,16 @@ export function fetchRoute(routeId: string, agencyKey: string): Promise<Route> {
   );
 }
 
-export function fetchStops(params?: {
-  q?: string;
-  agencyKey?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<{ data: Stop[]; total: number }> {
+export function fetchStops(
+  params?: { q?: string; agencyKey?: string; limit?: number; offset?: number },
+  signal?: AbortSignal,
+): Promise<{ data: Stop[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.agencyKey) qs.set('agencyKey', params.agencyKey);
   if (params?.limit !== undefined) qs.set('limit', String(params.limit));
   if (params?.offset !== undefined) qs.set('offset', String(params.offset));
-  return apiFetch<{ data: Stop[]; total: number }>(`/stops?${qs}`);
+  return apiFetch<{ data: Stop[]; total: number }>(`/stops?${qs}`, signal);
 }
 
 export function fetchStopDepartures(

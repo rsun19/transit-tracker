@@ -45,6 +45,88 @@ export interface DepartureResponse {
   directionId: number | null;
 }
 
+export interface AddedTripEntry {
+  trip: {
+    tripId: string;
+    routeId: string;
+    directionId: number | null;
+    headsign: string | null;
+  };
+  departureTime: number; // Unix seconds
+  routeShortName: string | null;
+  routeLongName: string | null;
+  headsignFallback: string | null;
+}
+
+/** Maximum window (ms) within which an ADDED trip is matched to a scheduled slot. */
+export const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Reconcile ADDED/unscheduled realtime trips against a list of scheduled departures.
+ *
+ * Many agencies (including MBTA) publish realtime predictions for scheduled trips
+ * under opaque ADDED-xxx trip IDs. This function:
+ *  1. Sorts ADDED entries by departure time ascending so high-frequency routes are
+ *     matched correctly (earlier trains claim their slot first).
+ *  2. For each ADDED entry, finds the nearest unmatched scheduled trip for the same
+ *     routeId + directionId within RECONCILE_WINDOW_MS.
+ *  3a. Match found → merges realtime delay into the scheduled row (mutates in place).
+ *  3b. No match → appends the ADDED entry as genuinely new extra service.
+ *
+ * Mutates `departures` in place and returns it for convenience.
+ */
+export function reconcileAddedTrips(
+  departures: DepartureResponse[],
+  addedEntries: AddedTripEntry[],
+): DepartureResponse[] {
+  const sorted = [...addedEntries].sort((a, b) => a.departureTime - b.departureTime);
+  const reconciledIndices = new Set<number>();
+
+  for (const entry of sorted) {
+    const addedMs = entry.departureTime * 1000;
+
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    for (let i = 0; i < departures.length; i++) {
+      if (reconciledIndices.has(i)) continue;
+      const dep = departures[i];
+      if (dep.routeId !== entry.trip.routeId) continue;
+      if (dep.directionId !== entry.trip.directionId) continue;
+      const diff = Math.abs(addedMs - new Date(dep.scheduledDeparture).getTime());
+      if (diff < bestDiff && diff <= RECONCILE_WINDOW_MS) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      reconciledIndices.add(bestIdx);
+      const schedMs = new Date(departures[bestIdx].scheduledDeparture).getTime();
+      departures[bestIdx].realtimeDelaySeconds = Math.round((addedMs - schedMs) / 1000);
+      departures[bestIdx].hasRealtime = true;
+      if (!departures[bestIdx].headsign) {
+        departures[bestIdx].headsign = entry.trip.headsign ?? entry.headsignFallback;
+      }
+    } else {
+      departures.push({
+        tripId: entry.trip.tripId,
+        routeId: entry.trip.routeId,
+        routeShortName: entry.routeShortName,
+        routeLongName: entry.routeLongName,
+        headsign: entry.trip.headsign ?? entry.headsignFallback,
+        scheduledDeparture: new Date(addedMs).toISOString(),
+        realtimeDelaySeconds: 0,
+        hasRealtime: true,
+        directionId: entry.trip.directionId,
+      });
+      // Prevent subsequent ADDED entries from matching this newly-pushed row.
+      reconciledIndices.add(departures.length - 1);
+    }
+  }
+
+  return departures;
+}
+
 @Injectable()
 export class StopsService {
   constructor(
@@ -128,18 +210,27 @@ export class StopsService {
           routeType: number;
         }>
       >(
-        `SELECT DISTINCT
-                COALESCE(child_s.parent_station_id, st2.stop_id) AS group_stop_id,
-                r2.route_id  AS "routeId",
-                r2.short_name AS "shortName",
-                r2.long_name  AS "longName",
-                r2.route_type AS "routeType"
-         FROM stop_times st2
-         JOIN stops child_s ON child_s.stop_id = st2.stop_id AND child_s.agency_id = st2.agency_id
-         JOIN trips t2  ON t2.trip_id   = st2.trip_id  AND t2.agency_id  = st2.agency_id
-         JOIN routes r2 ON r2.route_id  = t2.route_id  AND r2.agency_id  = t2.agency_id
-         WHERE st2.agency_id = $2
-           AND (st2.stop_id = ANY($1) OR child_s.parent_station_id = ANY($1))
+        // Expand stop IDs on the small stops table first (fast), then join into
+        // stop_times using the idx_stop_times_agency_stop_dept index per effective
+        // stop_id. This avoids the OR condition that previously prevented index use
+        // on the 4M+ row stop_times table.
+        `WITH expanded_stops AS MATERIALIZED (
+           SELECT stop_id AS query_stop_id, stop_id AS effective_stop_id
+           FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
+           UNION ALL
+           SELECT parent_station_id AS query_stop_id, stop_id AS effective_stop_id
+           FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
+         )
+         SELECT DISTINCT
+                es.query_stop_id       AS group_stop_id,
+                r2.route_id            AS "routeId",
+                r2.short_name          AS "shortName",
+                r2.long_name           AS "longName",
+                r2.route_type          AS "routeType"
+         FROM expanded_stops es
+         JOIN stop_times st2 ON st2.stop_id = es.effective_stop_id AND st2.agency_id = $2
+         JOIN trips t2  ON t2.trip_id  = st2.trip_id  AND t2.agency_id  = st2.agency_id
+         JOIN routes r2 ON r2.route_id = t2.route_id  AND r2.agency_id  = t2.agency_id
          ORDER BY group_stop_id, r2.short_name ASC`,
         [stopIdList, agencyId],
       );
@@ -165,6 +256,23 @@ export class StopsService {
       wheelchairBoarding: row.wheelchair_boarding,
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
+
+    // Sort search results by the "best" mode at each stop:
+    //   0 → Subway/Metro (route_type 1)
+    //   1 → Light rail / Tram / BRT (route_type 0)
+    //   2 → Commuter rail (route_type 2)
+    //   3 → Ferry (route_type 4)
+    //   4 → Everything else (bus, etc.)
+    const searchResultPriority = (routes: StopRouteRef[] | undefined): number => {
+      if (!routes) return 4;
+      const types = new Set(routes.map((r) => r.routeType));
+      if (types.has(1)) return 0;
+      if (types.has(0)) return 1;
+      if (types.has(2)) return 2;
+      if (types.has(4)) return 3;
+      return 4;
+    };
+    data.sort((a, b) => searchResultPriority(a.routes) - searchResultPriority(b.routes));
 
     const result = { data, total };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_DEPARTURES_TTL_S);
@@ -199,28 +307,48 @@ export class StopsService {
     const timezone = agRow.timezone;
     const agencyId: string = agRow.agencyId;
 
-    // Resolve stop metadata and detect whether this is a parent station.
-    // Parent stations (e.g. place-asmnl) have no stop_times of their own; their
-    // child platform stops (e.g. 70088, 70089) carry the actual departure rows.
-    // We aggregate child stop_ids so a single departures query covers the whole
-    // station, and return departures tagged with direction_id for the frontend to
-    // render Inbound / Outbound tables.
+    // Resolve stop metadata and detect whether this is a parent station or a child
+    // platform stop (e.g. 70067 — Alewife Outbound platform).
+    // • Parent stations (e.g. place-asmnl) have no stop_times of their own; we use
+    //   their children so departures from the whole station are shown.
+    // • Child platform stops have a parent_station_id; we use ALL siblings so that
+    //   both Inbound and Outbound tables are rendered for the station.
     const [stopInfo] = await this.dataSource.query<
-      Array<{ stop_name: string; child_stop_ids: string[] | null }>
+      Array<{
+        stop_name: string;
+        parent_station_id: string | null;
+        child_stop_ids: string[] | null;
+      }>
     >(
       `SELECT s.stop_name,
+              s.parent_station_id,
               ARRAY_AGG(c.stop_id) FILTER (WHERE c.stop_id IS NOT NULL) AS child_stop_ids
        FROM stops s
        LEFT JOIN stops c ON c.parent_station_id = s.stop_id AND c.agency_id = s.agency_id
        WHERE s.stop_id = $1 AND s.agency_id = $2
-       GROUP BY s.stop_name`,
+       GROUP BY s.stop_name, s.parent_station_id`,
       [stopId, agencyId],
     );
     const stopName: string = stopInfo?.stop_name ?? stopId;
     const childStopIds = stopInfo?.child_stop_ids;
-    // If this stop is a parent station, query all children; otherwise query itself.
-    const effectiveStopIds: string[] =
-      childStopIds && childStopIds.length > 0 ? childStopIds : [stopId];
+    const parentStationId = stopInfo?.parent_station_id ?? null;
+
+    let effectiveStopIds: string[];
+    if (childStopIds && childStopIds.length > 0) {
+      // This is a parent station — use its children.
+      effectiveStopIds = childStopIds;
+    } else if (parentStationId) {
+      // This is a child platform stop — fetch all siblings from the same parent so
+      // that departures in both directions are included.
+      const siblingRows = await this.dataSource.query<Array<{ stop_id: string }>>(
+        `SELECT stop_id FROM stops WHERE parent_station_id = $1 AND agency_id = $2`,
+        [parentStationId, agencyId],
+      );
+      effectiveStopIds = siblingRows.length > 0 ? siblingRows.map((r) => r.stop_id) : [stopId];
+    } else {
+      // Standalone stop — query only itself.
+      effectiveStopIds = [stopId];
+    }
 
     // en-CA locale produces YYYY-MM-DD strings without JSON.stringify overhead
     const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
@@ -283,17 +411,116 @@ export class StopsService {
       ],
     );
 
-    const data: DepartureResponse[] = rows.map((row) => ({
-      tripId: row.trip_id,
-      routeId: row.route_id,
-      routeShortName: row.short_name,
-      routeLongName: row.long_name,
-      headsign: row.trip_headsign,
-      scheduledDeparture: row.departure_time,
-      realtimeDelaySeconds: null,
-      hasRealtime: false,
-      directionId: row.direction_id ?? null,
-    }));
+    // Look up realtime delays for all returned trips in one Redis HMGET round-trip.
+    const delayMap = new Map<string, number>();
+    if (rows.length > 0) {
+      try {
+        const redis = this.cacheService.getClient();
+        const tripIds = rows.map((r) => r.trip_id);
+        const delayValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
+        tripIds.forEach((tripId, i) => {
+          const val = delayValues[i];
+          if (val !== null) delayMap.set(tripId, parseInt(val, 10));
+        });
+      } catch {
+        // Redis unavailable — fall back to scheduled-only departures
+      }
+    }
+
+    const data: DepartureResponse[] = rows.map((row) => {
+      const delay = delayMap.get(row.trip_id) ?? null;
+      return {
+        tripId: row.trip_id,
+        routeId: row.route_id,
+        routeShortName: row.short_name,
+        routeLongName: row.long_name,
+        headsign: row.trip_headsign,
+        scheduledDeparture: row.departure_time,
+        realtimeDelaySeconds: delay,
+        hasRealtime: delay !== null,
+        directionId: row.direction_id ?? null,
+      };
+    });
+
+    // Merge unscheduled / ADDED realtime trips from Redis
+    type AddedStop = { stopId: string; departureTime: number };
+    type AddedTrip = {
+      tripId: string;
+      routeId: string;
+      directionId: number | null;
+      headsign: string | null;
+      stops: AddedStop[];
+    };
+    try {
+      const redis = this.cacheService.getClient();
+      const addedRaw = await redis.hgetall(`added_trips:${agencyKey}`);
+      if (addedRaw && Object.keys(addedRaw).length > 0) {
+        const nowMs = Date.now();
+        const effectiveStopIdSet = new Set(effectiveStopIds);
+        const pendingAdded: Array<{ trip: AddedTrip; departureTime: number }> = [];
+        const addedRouteIds = new Set<string>();
+
+        for (const raw of Object.values(addedRaw)) {
+          const trip = JSON.parse(raw) as AddedTrip;
+          for (const stop of trip.stops) {
+            if (effectiveStopIdSet.has(stop.stopId) && stop.departureTime * 1000 > nowMs) {
+              addedRouteIds.add(trip.routeId);
+              pendingAdded.push({ trip, departureTime: stop.departureTime });
+              break; // one entry per trip
+            }
+          }
+        }
+
+        if (pendingAdded.length > 0) {
+          const addedRouteIdList = [...addedRouteIds];
+
+          // Fetch route metadata and representative headsigns per (route, direction)
+          // for ADDED trips — the GTFS-RT feed never includes headsign on added trips.
+          const [routeRows, headsignRows] = await Promise.all([
+            this.dataSource.query<
+              Array<{ route_id: string; short_name: string | null; long_name: string | null }>
+            >(
+              `SELECT route_id, short_name, long_name FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
+              [agencyId, addedRouteIdList],
+            ),
+            this.dataSource.query<
+              Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
+            >(
+              `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
+               FROM trips
+               WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
+               ORDER BY route_id, direction_id, trip_headsign`,
+              [agencyId, addedRouteIdList],
+            ),
+          ]);
+
+          const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
+          const headsignMap = new Map(
+            headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
+          );
+
+          const entries: AddedTripEntry[] = pendingAdded.map(({ trip, departureTime }) => ({
+            trip,
+            departureTime,
+            routeShortName: routeMap.get(trip.routeId)?.short_name ?? null,
+            routeLongName: routeMap.get(trip.routeId)?.long_name ?? null,
+            headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
+          }));
+
+          reconcileAddedTrips(data, entries);
+        }
+      }
+    } catch {
+      // Redis unavailable or parse error — ADDED trips are best-effort
+    }
+
+    // Re-sort by effective departure time (scheduled + delay) so realtime-advanced
+    // arrivals are not buried behind later scheduled-order entries
+    data.sort((a, b) => {
+      const aEff = new Date(a.scheduledDeparture).getTime() + (a.realtimeDelaySeconds ?? 0) * 1000;
+      const bEff = new Date(b.scheduledDeparture).getTime() + (b.realtimeDelaySeconds ?? 0) * 1000;
+      return aEff - bEff;
+    });
 
     const result = { data, stopId, agencyKey, stopName };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_DEPARTURES_TTL_S);

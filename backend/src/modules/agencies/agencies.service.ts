@@ -9,6 +9,7 @@ const AgencyConfigSchema = z.object({
   timezone: z.string().min(1),
   gtfsStaticUrl: z.string().url(),
   gtfsRealtimeUrl: z.string().url().optional(),
+  gtfsRealtimeTripUpdatesUrl: z.string().url().optional(),
   apiKeyEnvVar: z.string().optional(),
 });
 
