@@ -74,6 +74,7 @@
     "collectCoverageFrom": [
       "src/components/ui/AlertBanner.tsx",
       "src/components/ui/EmptyState.tsx",
+      "src/components/ui/Header.tsx",
       "src/components/ui/LoadingSkeleton.tsx",
       "src/components/stops/DepartureRow.tsx",
       "src/components/stops/StopCard.tsx"

@@ -13,6 +13,9 @@ RUN npm ci
 COPY frontend/src ./src
 COPY frontend/next.config.mjs ./
 
+ARG BACKEND_URL=http://localhost:3000
+ENV BACKEND_URL=$BACKEND_URL
+
 RUN npm run build
 
 # Stage 2: Production (standalone output)
