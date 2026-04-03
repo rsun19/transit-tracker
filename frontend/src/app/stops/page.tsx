@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
@@ -34,6 +34,7 @@ export default function StopsPage() {
   const [stops, setStops] = useState<Stop[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const debouncedQuery = useDebounce(query, 300);
 
   const search = useCallback(async (q: string) => {
@@ -42,12 +43,16 @@ export default function StopsPage() {
       setSearched(false);
       return;
     }
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    const { signal } = abortRef.current;
     setLoading(true);
     try {
-      const data = await fetchStops({ q: q.trim(), agencyKey: DEFAULT_AGENCY });
+      const data = await fetchStops({ q: q.trim(), agencyKey: DEFAULT_AGENCY }, signal);
       setStops(data.data);
       setSearched(true);
-    } catch {
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
       setStops([]);
       setSearched(true);
     } finally {
@@ -115,10 +120,17 @@ export default function StopsPage() {
                       <span>{stop.stopCode ? `Stop #${stop.stopCode}` : stop.stopId}</span>
                       {stop.routes && stop.routes.length > 0 && (
                         <Stack component="span" direction="row" spacing={0.5} flexWrap="wrap">
-                          {stop.routes.map((r) => (
+                          {Array.from(
+                            new Map(
+                              stop.routes.map((r) => {
+                                const label = r.shortName || r.longName || r.routeId;
+                                return [label, r];
+                              }),
+                            ).values(),
+                          ).map((r) => (
                             <Chip
                               key={r.routeId}
-                              label={r.shortName ?? r.longName ?? r.routeId}
+                              label={r.shortName || r.longName || r.routeId}
                               size="small"
                               variant="outlined"
                             />
