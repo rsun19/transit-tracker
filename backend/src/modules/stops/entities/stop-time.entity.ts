@@ -2,8 +2,8 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { Agency } from '@/modules/agencies/entities/agency.entity';
 
 @Entity('stop_times')
-@Index(['agencyId', 'tripId', 'stopSequence'])
-@Index(['agencyId', 'stopId', 'departureTime'])
+@Index('idx_stop_times_agency_trip_seq', ['agencyId', 'tripId', 'stopSequence'])
+@Index('idx_stop_times_agency_stop_dept', ['agencyId', 'stopId', 'departureTime'])
 export class StopTime {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

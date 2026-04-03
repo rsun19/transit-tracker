@@ -9,15 +9,45 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import Box from '@mui/material/Box';
+import Grid from '@mui/material/Grid';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Link from '@mui/material/Link';
-import { fetchRoute, fetchAlerts, type Route, type Alert } from '@/lib/api-client';
+import {
+  fetchRoute,
+  fetchAlerts,
+  type Route,
+  type RouteBranch,
+  type Alert,
+} from '@/lib/api-client';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { AlertBanner } from '@/components/ui/AlertBanner';
 
-// For now assume the first agency — in a multi-agency setup this would be a query param
 const DEFAULT_AGENCY = 'mbta';
+
+function StopList({
+  stops,
+  routerId,
+}: {
+  stops: RouteBranch['stops'];
+  routerId: ReturnType<typeof useRouter>;
+}) {
+  if (stops.length === 0) return <EmptyState message="No stops found for this branch" />;
+  return (
+    <List disablePadding>
+      {stops.map((stop) => (
+        <ListItem key={stop.stopId} disablePadding sx={{ mb: 0.5 }}>
+          <ListItemButton
+            onClick={() => routerId.push(`/stops/${encodeURIComponent(stop.stopId)}`)}
+            sx={{ borderRadius: 1, border: '1px solid', borderColor: 'divider' }}
+          >
+            <ListItemText primary={stop.stopName} secondary={stop.stopId} />
+          </ListItemButton>
+        </ListItem>
+      ))}
+    </List>
+  );
+}
 
 export default function RouteDetailPage() {
   const params = useParams();
@@ -44,8 +74,13 @@ export default function RouteDetailPage() {
       .finally(() => setLoading(false));
   }, [routeId]);
 
+  const branches = route?.branches ?? [];
+  const hasMultipleBranches = branches.length > 1;
+  // Fallback to the flat stops list for routes with only one branch or legacy responses
+  const singleStops = branches.length === 1 ? branches[0].stops : (route?.stops ?? []);
+
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
       <Breadcrumbs sx={{ mb: 2 }}>
         <Link underline="hover" color="inherit" href="/" sx={{ cursor: 'pointer' }}>
           Routes
@@ -90,24 +125,21 @@ export default function RouteDetailPage() {
             Stops
           </Typography>
 
-          {(route as Route & { stops?: { stopId: string; stopName: string }[] }).stops?.length ===
-          0 ? (
+          {hasMultipleBranches ? (
+            <Grid container spacing={3}>
+              {branches.map((branch) => (
+                <Grid key={branch.label} item xs={12} md={6}>
+                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                    {branch.label}
+                  </Typography>
+                  <StopList stops={branch.stops} routerId={router} />
+                </Grid>
+              ))}
+            </Grid>
+          ) : singleStops.length === 0 ? (
             <EmptyState message="No stops found for this route" />
           ) : (
-            <List disablePadding>
-              {(
-                (route as Route & { stops?: { stopId: string; stopName: string }[] }).stops ?? []
-              ).map((stop) => (
-                <ListItem key={stop.stopId} disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    onClick={() => router.push(`/stops/${encodeURIComponent(stop.stopId)}`)}
-                    sx={{ borderRadius: 1, border: '1px solid', borderColor: 'divider' }}
-                  >
-                    <ListItemText primary={stop.stopName} secondary={stop.stopId} />
-                  </ListItemButton>
-                </ListItem>
-              ))}
-            </List>
+            <StopList stops={singleStops} routerId={router} />
           )}
         </>
       )}

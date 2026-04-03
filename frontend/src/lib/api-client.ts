@@ -11,6 +11,20 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 // --- Types ---
 
+export interface RouteStop {
+  stopId: string;
+  stopName: string;
+  latitude: number;
+  longitude: number;
+  stopSequence: number;
+}
+
+export interface RouteBranch {
+  label: string;
+  directionId: number;
+  stops: RouteStop[];
+}
+
 export interface Route {
   id: string;
   routeId: string;
@@ -19,13 +33,8 @@ export interface Route {
   routeType: number;
   color: string | null;
   textColor: string | null;
-  stops?: {
-    stopId: string;
-    stopName: string;
-    latitude: number;
-    longitude: number;
-    stopSequence: number;
-  }[];
+  stops?: RouteStop[];
+  branches?: RouteBranch[];
   shape?: GeoJsonLineString | null;
 }
 
@@ -63,6 +72,7 @@ export interface Departure {
   scheduledDeparture: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
+  directionId: number | null;
 }
 
 export interface Trip {
@@ -154,23 +164,12 @@ export function fetchStopDepartures(
   stopId: string,
   agencyKey: string,
   params?: { limit?: number; after?: string },
-): Promise<{ data: Departure[]; stopId: string; agencyKey: string }> {
+): Promise<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }> {
   const qs = new URLSearchParams({ agencyKey });
   if (params?.limit !== undefined) qs.set('limit', String(params.limit));
   if (params?.after) qs.set('after', params.after);
-  return apiFetch<{ data: Departure[]; stopId: string; agencyKey: string }>(
+  return apiFetch<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }>(
     `/stops/${encodeURIComponent(stopId)}/departures?${qs}`,
-  );
-}
-
-export function fetchStopRoutes(
-  stopId: string,
-  agencyKey: string,
-): Promise<{
-  data: { routeId: string; shortName: string | null; longName: string | null; routeType: number }[];
-}> {
-  return apiFetch(
-    `/stops/${encodeURIComponent(stopId)}/routes?agencyKey=${encodeURIComponent(agencyKey)}`,
   );
 }
 

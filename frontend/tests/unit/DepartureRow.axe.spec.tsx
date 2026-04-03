@@ -17,6 +17,7 @@ const scheduledDeparture: Departure = {
   scheduledDeparture: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
   realtimeDelaySeconds: null,
   hasRealtime: false,
+  directionId: null,
 };
 
 const realtimeDeparture: Departure = {

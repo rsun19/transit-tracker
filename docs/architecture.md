@@ -78,6 +78,26 @@ NestJS 10 application. Serves the REST API at `/api/v1`. Modules:
 | `HealthModule`   | `GET /health`                                                                           |
 | `CacheModule`    | Internal Redis wrapper (cache-aside)                                                    |
 
+#### Branching route detection (`GET /routes/:id`)
+
+Some routes fork into multiple terminal branches (e.g. the MBTA Red Line splits into Ashmont and Braintree branches). The route detail endpoint detects this automatically:
+
+1. All trips for `direction_id = 0` are grouped by `trip_headsign` (the destination sign).
+2. `DISTINCT ON (trip_headsign)` with `ORDER BY trip_headsign, stop_count DESC` selects the longest representative trip per unique headsign — one per branch.
+3. The response includes a `branches` array, each element containing `label` (the headsign), `directionId`, and the ordered `stops` list for that branch.
+4. The flat `stops` field (longest single branch) is preserved for backward compatibility.
+
+The frontend renders branches side-by-side in a two-column grid when `branches.length > 1`.
+
+#### Stop search hierarchy (`GET /stops`)
+
+GTFS feeds use a parent/child stop hierarchy:
+
+- **Parent stations** (e.g. `place-asmnl` — "Ashmont") represent the physical hub. Their `parent_station_id` field is blank (empty string `''` after CSV ingestion).
+- **Child stops** (individual platforms/entrances, e.g. `70093`, `70094`) have `parent_station_id` set to their parent's `stop_id`.
+
+The search endpoint filters to `parent_station_id IS NULL OR parent_station_id = ''` to return one result per station rather than one per platform. Note: GTFS blank CSV fields are ingested as empty strings, not SQL `NULL`, so both conditions are required.
+
 All routes and stops endpoints use a Redis cache-aside pattern. See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
 
 ### Ingestion Worker

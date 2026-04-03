@@ -19,6 +19,12 @@ export interface RouteStopResponse {
   stopSequence: number;
 }
 
+export interface RouteBranch {
+  label: string;
+  directionId: number;
+  stops: RouteStopResponse[];
+}
+
 export interface RouteResponse {
   id: string;
   agencyKey?: string;
@@ -29,6 +35,7 @@ export interface RouteResponse {
   color: string | null;
   textColor: string | null;
   stops?: RouteStopResponse[];
+  branches?: RouteBranch[];
   shape?: GeoJsonLineString | null;
 }
 
@@ -79,7 +86,7 @@ export class RoutesService {
   }
 
   async findOne(routeId: string, agencyKey: string): Promise<RouteResponse> {
-    const cacheKey = `cache:route:v2:${agencyKey}:${routeId}`;
+    const cacheKey = `cache:route:v3:${agencyKey}:${routeId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as RouteResponse;
 
@@ -91,47 +98,78 @@ export class RoutesService {
 
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
 
-    // Resolve one representative shape_id for the route first.
-    // Avoiding a correlated subquery here prevents very slow scans on large shape/trip tables.
-    const tripRows = await this.routeRepo.query<
-      Array<{ trip_id: string; shape_id: string | null }>
+    // Find one representative trip per outbound (direction_id = 0) branch, choosing
+    // the trip with the most stops for each unique headsign. This correctly handles
+    // branching routes (e.g. Red Line: Ashmont and Braintree) by picking the longest
+    // full-run trip for each terminal rather than an arbitrary first trip.
+    // direction_id = 0 only — direction 1 is the reverse of each branch.
+    const branchReps = await this.routeRepo.query<
+      Array<{
+        trip_id: string;
+        shape_id: string | null;
+        trip_headsign: string | null;
+        stop_count: string;
+      }>
     >(
-      `SELECT t.trip_id, t.shape_id
-       FROM trips t
-       JOIN agencies a ON a."agencyId" = t.agency_id
-       WHERE t.route_id = $1
-         AND a.agency_key = $2
-         AND EXISTS (
-           SELECT 1
-           FROM stop_times st
-           WHERE st.trip_id = t.trip_id
-             AND st.agency_id = t.agency_id
-         )
-       ORDER BY t.trip_id ASC
-       LIMIT 1`,
+      `WITH trip_stop_counts AS (
+         SELECT t.trip_id, t.direction_id, t.trip_headsign, t.shape_id,
+                COUNT(st.stop_id)::int AS stop_count
+         FROM trips t
+         JOIN agencies a ON a."agencyId" = t.agency_id
+         JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
+         WHERE t.route_id = $1 AND a.agency_key = $2 AND t.direction_id = 0
+         GROUP BY t.trip_id, t.direction_id, t.trip_headsign, t.shape_id
+       )
+       SELECT DISTINCT ON (trip_headsign)
+              trip_id, shape_id, trip_headsign, stop_count
+       FROM trip_stop_counts
+       ORDER BY trip_headsign, stop_count DESC`,
       [routeId, agencyKey],
     );
 
-    const tripId = tripRows[0]?.trip_id ?? null;
-    const shapeId = tripRows[0]?.shape_id ?? null;
+    // For routes with no outbound trips (shouldn't happen, but guard anyway)
+    if (branchReps.length === 0) throw new NotFoundException(`Route ${routeId} not found`);
 
-    const stops = tripId
-      ? await this.routeRepo.query<RouteStopResponse[]>(
-          `SELECT
-             s.stop_id AS "stopId",
-             s.stop_name AS "stopName",
-             ST_Y(s.location::geometry) AS latitude,
-             ST_X(s.location::geometry) AS longitude,
-             st.stop_sequence AS "stopSequence"
-           FROM stop_times st
-           JOIN agencies a ON a."agencyId" = st.agency_id
-           JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = st.agency_id
-           WHERE st.trip_id = $1
-             AND a.agency_key = $2
-           ORDER BY st.stop_sequence ASC`,
-          [tripId, agencyKey],
-        )
-      : [];
+    // Fetch stops for every branch in one batched query, then split by trip_id
+    const branchTripIds = branchReps.map((b) => b.trip_id);
+    const agencyId = route.agencyId;
+    const allStopRows = await this.routeRepo.query<Array<RouteStopResponse & { trip_id: string }>>(
+      `SELECT st.trip_id,
+              s.stop_id AS "stopId",
+              s.stop_name AS "stopName",
+              ST_Y(s.location::geometry) AS latitude,
+              ST_X(s.location::geometry) AS longitude,
+              st.stop_sequence AS "stopSequence"
+       FROM stop_times st
+       JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = st.agency_id
+       WHERE st.trip_id = ANY($1) AND st.agency_id = $2
+       ORDER BY st.trip_id, st.stop_sequence ASC`,
+      [branchTripIds, agencyId],
+    );
+
+    // Group fetched stops back to their branch trip
+    const stopsByTripId = new Map<string, RouteStopResponse[]>();
+    for (const row of allStopRows) {
+      const { trip_id, ...stop } = row;
+      if (!stopsByTripId.has(trip_id)) stopsByTripId.set(trip_id, []);
+      stopsByTripId.get(trip_id)!.push(stop);
+    }
+
+    // Sort branches by stop count DESC (longest/most-complete branch first)
+    const sortedBranches = [...branchReps].sort(
+      (a, b) => parseInt(b.stop_count) - parseInt(a.stop_count),
+    );
+
+    const branches: RouteBranch[] = sortedBranches.map((b) => ({
+      label: b.trip_headsign ?? routeId,
+      directionId: 0,
+      stops: stopsByTripId.get(b.trip_id) ?? [],
+    }));
+
+    // Use the longest branch's stops as the flat `stops` field (backward compat)
+    const stops = branches[0]?.stops ?? [];
+    // Use the longest branch's shape for the route polyline
+    const shapeId = sortedBranches[0]?.shape_id ?? null;
 
     const shapePoints = shapeId
       ? await this.shapeRepo
@@ -173,7 +211,7 @@ export class RoutesService {
       shape = { type: 'LineString', coordinates: coords };
     }
 
-    const result: RouteResponse = { ...this.toResponse(route), stops, shape };
+    const result: RouteResponse = { ...this.toResponse(route), stops, branches, shape };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ROUTES_TTL_S);
     return result;
   }

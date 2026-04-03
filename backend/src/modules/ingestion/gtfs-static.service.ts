@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import fetch from 'node-fetch';
@@ -31,6 +32,7 @@ export class GtfsStaticService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly agenciesService: AgenciesService,
+    private readonly configService: ConfigService,
   ) {}
 
   async ingestAgency(agencyConfig: ResolvedAgency): Promise<void> {
@@ -232,6 +234,20 @@ export class GtfsStaticService {
     await q(`ALTER TABLE stop_times SET UNLOGGED`).catch(() => {});
     await q(`ALTER TABLE shapes SET UNLOGGED`).catch(() => {});
 
+    // Drop stop_times secondary indexes before the COPY so PostgreSQL doesn't pay
+    // per-row B-tree maintenance cost for 1.4M rows. We rebuild them in a single
+    // sort-based pass after COPY — typically 3-5x faster than incremental updates.
+    this.logger.debug(`Dropping stop_times secondary indexes for bulk-load...`);
+    await q(`DROP INDEX IF EXISTS idx_stop_times_agency_stop_dept`);
+    await q(`DROP INDEX IF EXISTS idx_stop_times_agency_trip_seq`);
+
+    // Drop GIN trigram indexes on stops before INSERT — GIN indexes are expensive to
+    // update incrementally (they fan out into many posting list entries per row).
+    // Rebuilding them in one pass after all stops are inserted is much faster.
+    this.logger.debug(`Dropping stop GIN trigram indexes for bulk-load...`);
+    await q(`DROP INDEX IF EXISTS idx_stops_stop_name_trgm`).catch(() => {});
+    await q(`DROP INDEX IF EXISTS idx_stops_stop_code_trgm`).catch(() => {});
+
     const BATCH = 500;
     // 3. Insert routes — 7 params per row
     const routes = data.routes;
@@ -287,6 +303,17 @@ export class GtfsStaticService {
     }
     this.logger.log(`✓ Stops inserted: ${stops.length}`);
 
+    // Rebuild GIN trigram indexes now that all stops are inserted — single-pass
+    // build is far cheaper than per-row GIN updates during INSERT.
+    this.logger.debug(`Rebuilding stop GIN trigram indexes...`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
+    );
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
+    );
+    this.logger.log(`✓ Stop GIN trigram indexes rebuilt`);
+
     // 5. Insert trips — 8 params per row
     const trips = data.trips;
     (data as { trips: unknown }).trips = [];
@@ -325,6 +352,61 @@ export class GtfsStaticService {
     await this.copyStopTimes(data.stopTimesPath, agencyId);
     this.logger.log(`✓ Stop times inserted (via COPY)`);
 
+    // Rebuild stop_times secondary indexes in a single sort-based pass.
+    // Higher maintenance_work_mem allows PostgreSQL to sort in memory instead of
+    // spilling to disk, making index builds significantly faster.
+    this.logger.debug(`Rebuilding stop_times indexes (single-pass sort-based build)...`);
+    await q(`SET maintenance_work_mem = '256MB'`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
+    );
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
+    );
+    await q(`RESET maintenance_work_mem`);
+    this.logger.log(`✓ stop_times indexes rebuilt`);
+
+    // CLUSTER physically reorders the stop_times heap to match the (agency_id, stop_id)
+    // index. This converts per-stop queries from random I/O across the heap into
+    // sequential page reads — critical for high-frequency stops with thousands of
+    // stop_times rows scattered across many pages.
+    // WARNING: CLUSTER takes an ACCESS EXCLUSIVE lock that blocks all reads and writes
+    // for ~2 minutes on a full MBTA dataset. Enable only during a maintenance window
+    // by setting GTFS_CLUSTER_STOP_TIMES=true in .env (defaults to off).
+    if (this.configService.get<string>('GTFS_CLUSTER_STOP_TIMES') === 'true') {
+      this.logger.debug(`Clustering stop_times on stop_id index (may take ~2 minutes)...`);
+      await q(`CLUSTER stop_times USING idx_stop_times_agency_stop_dept`);
+      this.logger.log(`✓ stop_times clustered`);
+    } else {
+      this.logger.log(
+        `Skipping CLUSTER (set GTFS_CLUSTER_STOP_TIMES=true to enable — takes ACCESS EXCLUSIVE lock ~2 min)`,
+      );
+    }
+
+    // Prune stops that have no stop_times and are not referenced as a parent station.
+    // GTFS parent-station stops (location_type=1) have no stop_times of their own but
+    // must be retained so child-stop grouping works. All other unreferenced stops are
+    // dead weight that inflate search results and waste memory.
+    this.logger.debug(`Pruning orphan stops (no stop_times, not a parent station)...`);
+    const pruneResult = await q<Array<{ count: string }>>(
+      `WITH deleted AS (
+         DELETE FROM stops
+         WHERE agency_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM stop_times st
+             WHERE st.stop_id = stops.stop_id AND st.agency_id = stops.agency_id
+           )
+           AND stop_id NOT IN (
+             SELECT DISTINCT parent_station_id FROM stops
+             WHERE agency_id = $1 AND parent_station_id IS NOT NULL
+           )
+         RETURNING 1
+       )
+       SELECT COUNT(*)::text AS count FROM deleted`,
+      [agencyId],
+    );
+    this.logger.log(`✓ Orphan stops pruned: ${pruneResult[0]?.count ?? 0}`);
+
     // 8. Insert service calendars — 11 params per row
     this.logger.debug(
       `Inserting ${data.calendars.length} service calendars in batches of ${BATCH}...`,
@@ -356,7 +438,19 @@ export class GtfsStaticService {
     }
     this.logger.log(`✓ Service calendars inserted: ${data.calendars.length}`);
 
-    // 9. Mark ingested
+    // 9. Refresh planner statistics for all ingested tables so the query planner
+    // uses accurate row count and histogram estimates on the freshly loaded data.
+    this.logger.debug(`Analyzing ingested tables...`);
+    await Promise.all([
+      q(`ANALYZE stop_times`),
+      q(`ANALYZE trips`),
+      q(`ANALYZE stops`),
+      q(`ANALYZE routes`),
+      q(`ANALYZE service_calendars`),
+    ]);
+    this.logger.log(`✓ Table statistics refreshed`);
+
+    // 10. Mark ingested
     this.logger.debug(`Marking agency as ingested...`);
     await q(`UPDATE agencies SET last_ingested_at = NOW() WHERE "agencyId" = $1`, [agencyId]);
     this.logger.log(`✓ Agency marked as ingested`);
