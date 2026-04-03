@@ -81,6 +81,39 @@ npm test
 
 ---
 
+## Deployment (Hetzner + GitHub Actions CD)
+
+Merges to `main` automatically build and push Docker images to GHCR, then SSH to the Hetzner server and restart the stack.
+
+### GitHub Actions Secrets
+
+Set these under **Settings → Secrets and variables → Actions → Repository secrets** in your GitHub repository:
+
+| Secret            | Description                                                                    |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `HETZNER_HOST`    | Public IP address of the Hetzner server                                        |
+| `HETZNER_USER`    | SSH username (e.g. `root`)                                                     |
+| `SSH_PRIVATE_KEY` | Private SSH key whose public half is in `~/.ssh/authorized_keys` on the server |
+| `CERTBOT_EMAIL`   | Email address for Let's Encrypt certificate expiry notices                     |
+
+### Server `.env` variables
+
+The production `.env` at `/opt/transit-tracker/.env` on the server must contain all variables from `.env.example` plus these which CI injects automatically:
+
+| Variable            | Set by | Description                                                   |
+| ------------------- | ------ | ------------------------------------------------------------- |
+| `POSTGRES_USER`     | You    | PostgreSQL username                                           |
+| `POSTGRES_PASSWORD` | You    | PostgreSQL password — use a strong random value in production |
+| `POSTGRES_DB`       | You    | PostgreSQL database name                                      |
+| `IMAGE_TAG`         | CI     | Git SHA of the deployed commit                                |
+| `REGISTRY_OWNER`    | CI     | GitHub repository owner (used to pull images from GHCR)       |
+
+### First deploy
+
+Point your domain's DNS A record to the Hetzner server IP before the first push to `main`. The deploy script detects the absence of a TLS certificate and bootstraps it automatically via Let's Encrypt before starting nginx.
+
+---
+
 ## Documentation
 
 | Doc                                            | Contents                                                      |
