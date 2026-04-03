@@ -257,6 +257,23 @@ export class StopsService {
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
+    // Sort search results by the "best" mode at each stop:
+    //   0 → Subway/Metro (route_type 1)
+    //   1 → Light rail / Tram / BRT (route_type 0)
+    //   2 → Commuter rail (route_type 2)
+    //   3 → Ferry (route_type 4)
+    //   4 → Everything else (bus, etc.)
+    const searchResultPriority = (routes: StopRouteRef[] | undefined): number => {
+      if (!routes) return 4;
+      const types = new Set(routes.map((r) => r.routeType));
+      if (types.has(1)) return 0;
+      if (types.has(0)) return 1;
+      if (types.has(2)) return 2;
+      if (types.has(4)) return 3;
+      return 4;
+    };
+    data.sort((a, b) => searchResultPriority(a.routes) - searchResultPriority(b.routes));
+
     const result = { data, total };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_DEPARTURES_TTL_S);
     return result;
