@@ -589,9 +589,9 @@ export class StopsService {
         ? T
         : never;
 
-    const agencyFilter = params.agencyKey
-      ? `AND a.agency_key = '${params.agencyKey.replace(/'/g, "''")}'`
-      : '';
+    const agencyFilter = params.agencyKey ? `AND a.agency_key = $5` : '';
+    const queryParams: unknown[] = [params.lat, params.lon, radius, limit];
+    if (params.agencyKey) queryParams.push(params.agencyKey);
 
     const rows = await this.dataSource.query<
       Array<{
@@ -638,7 +638,7 @@ export class StopsService {
          ${agencyFilter}
        ORDER BY s.location::geography <-> ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
        LIMIT $4`,
-      [params.lat, params.lon, radius, limit],
+      queryParams,
     );
 
     const stopsWithDepartures = await Promise.all(
