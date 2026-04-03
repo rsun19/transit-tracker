@@ -89,6 +89,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        BACKEND_URL: http://backend:3000
     environment:
       NODE_ENV: production
       BACKEND_URL: http://backend:3000
