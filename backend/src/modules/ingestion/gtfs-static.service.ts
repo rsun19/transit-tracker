@@ -473,6 +473,7 @@ export class GtfsStaticService {
         UNIQUE (agency_id, route_id)
       )
     `);
+    await q(`CREATE INDEX ON routes_new (agency_id, route_type)`);
     await q(`
       CREATE TABLE stops_new (
         id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -640,23 +641,99 @@ export class GtfsStaticService {
       await q(`ALTER INDEX "${from}" RENAME TO "${to}"`).catch(() => {});
     }
 
-    // Phase 3b: reconcile PK constraints, unique constraints, and regular indexes
-    // so their names match TypeORM's expectations. We derive canonical names from
-    // the _old tables, which still hold the original TypeORM-generated names.
-    // Only indexes whose _old name does NOT end in '_old' are canonical sources —
-    // those ending in '_old' were parked by Phase 1 and are already handled above.
-    for (const [liveTable, oldTable] of [
+    // Phase 3b: collect canonical constraint/index names.
+    //
+    // For PK and UQ constraints → use TypeORM's DataSource entity metadata as the
+    // authoritative source. This is deterministic and does NOT depend on the _old
+    // tables' constraint names (which could be stale after a prior failed ingestion).
+    //
+    // For regular (non-PK, non-UQ) indexes → read from _old tables using a
+    // pg_class OID join (avoids the ::regclass cast that fails when the same
+    // index name exists on both the live and _old table simultaneously).
+    type ConRow = { conname: string; cols: string };
+    type IdxRow = { indexname: string; cols: string; index_type: string };
+
+    // Build canonical PK and UQ info from TypeORM entity metadata.
+    const strategy = this.dataSource.namingStrategy;
+    const entityCanonical = new Map<
+      string,
+      { pkName: string; uqNames: Array<{ name: string; cols: string }> }
+    >();
+    for (const meta of this.dataSource.entityMetadatas) {
+      const pkCols = meta.primaryColumns.map((c) => c.databaseName);
+      const pkName = strategy.primaryKeyName(meta.tableName, pkCols);
+      const uqNames = meta.uniques.map((uq) => ({
+        name: strategy.uniqueConstraintName(
+          meta.tableName,
+          uq.columns.map((c) => c.databaseName),
+        ),
+        cols: uq.columns
+          .map((c) => c.databaseName)
+          .sort()
+          .join(','),
+      }));
+      entityCanonical.set(meta.tableName, { pkName, uqNames });
+    }
+
+    // Uses pg_class OID join — avoids the ::regclass cast that fails when a
+    // same-named index exists on both the live and _old table simultaneously.
+    const idxSql = `
+      SELECT ix.indexname,
+             string_agg(a.attname, ',' ORDER BY array_position(i.indkey::int[], a.attnum::int)) AS cols,
+             am.amname AS index_type
+      FROM pg_indexes ix
+      JOIN pg_namespace ns ON ns.nspname = ix.schemaname
+      JOIN pg_class     t  ON t.relname = ix.tablename AND t.relnamespace = ns.oid AND t.relkind = 'r'
+      JOIN pg_class     ic ON ic.relname = ix.indexname AND ic.relnamespace = ns.oid AND ic.relkind = 'i'
+      JOIN pg_index     i  ON i.indexrelid = ic.oid
+      JOIN pg_am        am ON am.oid = ic.relam
+      JOIN pg_attribute a  ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey) AND a.attnum > 0
+      WHERE t.relname = $1 AND NOT i.indisunique AND NOT i.indisprimary
+      GROUP BY ix.indexname, am.amname`;
+
+    const tablePairs = [
       ['routes', 'routes_old'],
       ['stops', 'stops_old'],
       ['trips', 'trips_old'],
       ['shapes', 'shapes_old'],
       ['service_calendars', 'service_calendars_old'],
       ['stop_times', 'stop_times_old'],
-    ] as [string, string][]) {
-      await this.reconcileConstraintsAndIndexes(q, liveTable, oldTable);
+    ] as [string, string][];
+
+    const canonicalInfo: Array<{
+      liveTable: string;
+      oldPKs: ConRow[];
+      oldUQs: ConRow[];
+      oldIdxs: IdxRow[];
+    }> = [];
+
+    for (const [liveTable, oldTable] of tablePairs) {
+      // PK and UQ come from TypeORM DataSource (authoritative).
+      const entityInfo = entityCanonical.get(liveTable);
+      const oldPKs: ConRow[] = entityInfo
+        ? [
+            {
+              conname: entityInfo.pkName,
+              cols: (
+                this.dataSource.entityMetadatas
+                  .find((m) => m.tableName === liveTable)
+                  ?.primaryColumns.map((c) => c.databaseName) ?? []
+              ).join(','),
+            },
+          ]
+        : [];
+      const oldUQs: ConRow[] = (entityInfo?.uqNames ?? []).map((uq) => ({
+        conname: uq.name,
+        cols: uq.cols,
+      }));
+
+      // Regular index names still come from the _old table (captures IDX_<hash>
+      // names that TypeORM synchronize may have created/corrected on a prior run).
+      const oldIdxs = await q(idxSql, [oldTable]).then((r) => r as IdxRow[]);
+      canonicalInfo.push({ liveTable, oldPKs, oldUQs, oldIdxs });
     }
 
-    // Phase 4: drop old tables (also drops all their associated indexes).
+    // Phase 4: drop old tables (also drops their indexes and frees canonical names).
     for (const table of [
       'stop_times_old',
       'shapes_old',
@@ -667,22 +744,33 @@ export class GtfsStaticService {
     ]) {
       await q(`DROP TABLE IF EXISTS "${table}"`);
     }
+
+    // Phase 5: reconcile live tables now that _old tables are gone and canonical
+    // constraint/index names are no longer in use anywhere.
+    for (const { liveTable, oldPKs, oldUQs, oldIdxs } of canonicalInfo) {
+      await this.reconcileConstraintsAndIndexes(q, liveTable, oldPKs, oldUQs, oldIdxs);
+    }
   }
 
-  // Derives canonical PK, unique constraint, and regular index names from `oldTable`
-  // (which still has the names TypeORM originally generated) and renames any mismatched
-  // names on `liveTable` (the just-swapped-in shadow table) to match.
+  // Renames any mismatched PK constraints, unique constraints, and regular indexes
+  // on `liveTable` to match the canonical names supplied via `oldPKs`/`oldUQs`/`oldIdxs`
+  // (collected from the corresponding _old table before it was dropped).
   //
-  // Matching is done by column fingerprint (sorted column names + index type) so the
-  // reconciliation is robust to any naming scheme used during shadow table creation.
+  // Matching is done by column fingerprint (sorted column names + index type).
+  // Names ending in '_old' are skipped — they were parked by Phase 1 and already
+  // handled by Phase 3a.
   //
-  // Indexes whose name on `oldTable` ends in '_old' are skipped — they were parked
-  // by Phase 1 of swapTables and have already been handled by Phase 3a.
+  // All renames use .catch(() => {}) so a stale/duplicate name never aborts the swap.
   private async reconcileConstraintsAndIndexes(
     q: (sql: string, params?: unknown[]) => Promise<unknown>,
     liveTable: string,
-    oldTable: string,
+    oldPKs: { conname: string; cols: string }[],
+    oldUQs: { conname: string; cols: string }[],
+    oldIdxs: { indexname: string; cols: string; index_type: string }[],
   ): Promise<void> {
+    type ConRow = { conname: string; cols: string };
+    type IdxRow = { indexname: string; cols: string; index_type: string };
+
     const constraintSql = `
       SELECT c.conname,
              string_agg(a.attname, ',' ORDER BY array_position(c.conkey::int[], a.attnum::int)) AS cols
@@ -697,26 +785,22 @@ export class GtfsStaticService {
              string_agg(a.attname, ',' ORDER BY array_position(i.indkey::int[], a.attnum::int)) AS cols,
              am.amname AS index_type
       FROM pg_indexes ix
-      JOIN pg_class     t  ON t.relname = ix.tablename AND t.relkind = 'r' AND t.relname = $1
-      JOIN pg_index     i  ON i.indexrelid = (ix.schemaname || '.' || ix.indexname)::regclass
-      JOIN pg_am        am ON am.oid = (SELECT relam FROM pg_class WHERE oid = i.indexrelid)
+      JOIN pg_namespace ns ON ns.nspname = ix.schemaname
+      JOIN pg_class     t  ON t.relname = ix.tablename AND t.relnamespace = ns.oid AND t.relkind = 'r'
+      JOIN pg_class     ic ON ic.relname = ix.indexname AND ic.relnamespace = ns.oid AND ic.relkind = 'i'
+      JOIN pg_index     i  ON i.indexrelid = ic.oid
+      JOIN pg_am        am ON am.oid = ic.relam
       JOIN pg_attribute a  ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey) AND a.attnum > 0
-      WHERE NOT i.indisunique AND NOT i.indisprimary
+      WHERE t.relname = $1 AND NOT i.indisunique AND NOT i.indisprimary
       GROUP BY ix.indexname, am.amname`;
 
-    type ConRow = { conname: string; cols: string };
-    type IdxRow = { indexname: string; cols: string; index_type: string };
+    const getLiveConstraints = async (type: 'p' | 'u'): Promise<ConRow[]> =>
+      (await q(constraintSql, [liveTable, type])) as ConRow[];
+    const getLiveIndexes = async (): Promise<IdxRow[]> =>
+      (await q(indexSql, [liveTable])) as IdxRow[];
 
-    const getConstraints = async (table: string, type: 'p' | 'u'): Promise<ConRow[]> =>
-      (await q(constraintSql, [table, type])) as ConRow[];
-    const getIndexes = async (table: string): Promise<IdxRow[]> =>
-      (await q(indexSql, [table])) as IdxRow[];
-
-    // Reconcile PK constraints (fixes <table>_new_pkey → <table>_pkey)
-    const [oldPKs, livePKs] = await Promise.all([
-      getConstraints(oldTable, 'p'),
-      getConstraints(liveTable, 'p'),
-    ]);
+    // Reconcile PK constraints (e.g. stops_new_pkey → pk_<hash>)
+    const livePKs = await getLiveConstraints('p');
     for (const old of oldPKs) {
       if (old.conname.endsWith('_old')) continue;
       const live = livePKs.find((c) => c.cols === old.cols);
@@ -727,12 +811,8 @@ export class GtfsStaticService {
       }
     }
 
-    // Reconcile unique constraints (fixes TypeORM UQ_<hash> mismatch that would
-    // cause a startup crash when synchronize:true tries to create a duplicate)
-    const [oldUQs, liveUQs] = await Promise.all([
-      getConstraints(oldTable, 'u'),
-      getConstraints(liveTable, 'u'),
-    ]);
+    // Reconcile unique constraints (e.g. stops_new_agency_id_stop_id_key → UQ_<hash>)
+    const liveUQs = await getLiveConstraints('u');
     for (const old of oldUQs) {
       if (old.conname.endsWith('_old')) continue;
       const live = liveUQs.find((c) => c.cols === old.cols);
@@ -743,11 +823,10 @@ export class GtfsStaticService {
       }
     }
 
-    // Reconcile regular indexes (fixes TypeORM IDX_<hash> mismatch that would
-    // cause redundant duplicate indexes on the next startup synchronize)
-    const [oldIdxs, liveIdxs] = await Promise.all([getIndexes(oldTable), getIndexes(liveTable)]);
+    // Reconcile regular (non-unique, non-PK) indexes (e.g. IDX_<hash> mismatch)
+    const liveIdxs = await getLiveIndexes();
     for (const old of oldIdxs) {
-      if (old.indexname.endsWith('_old')) continue; // parked by Phase 1 — not canonical
+      if (old.indexname.endsWith('_old')) continue;
       const live = liveIdxs.find((i) => i.cols === old.cols && i.index_type === old.index_type);
       if (live && live.indexname !== old.indexname) {
         await q(`ALTER INDEX "${live.indexname}" RENAME TO "${old.indexname}"`).catch(() => {});
