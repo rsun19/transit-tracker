@@ -377,14 +377,23 @@ export class GtfsStaticService {
       // 10. Build stop_times indexes on shadow table — single sort-based pass.
       // Higher maintenance_work_mem lets PostgreSQL sort in memory rather than spill to disk.
       this.logger.debug(`Building stop_times indexes on shadow table (single-pass sort)...`);
-      await q(`SET maintenance_work_mem = '256MB'`);
-      await q(
-        `CREATE INDEX idx_stop_times_agency_stop_dept_new ON stop_times_new (agency_id, stop_id, departure_time)`,
-      );
-      await q(
-        `CREATE INDEX idx_stop_times_agency_trip_seq_new ON stop_times_new (agency_id, trip_id, stop_sequence)`,
-      );
-      await q(`RESET maintenance_work_mem`);
+      // Use a dedicated QueryRunner so SET maintenance_work_mem applies to the same
+      // connection as the subsequent CREATE INDEX calls. this.dataSource.query() is
+      // pooled and may acquire a different connection for each await.
+      const qr = this.dataSource.createQueryRunner();
+      await qr.connect();
+      try {
+        await qr.query(`SET maintenance_work_mem = '256MB'`);
+        await qr.query(
+          `CREATE INDEX idx_stop_times_agency_stop_dept_new ON stop_times_new (agency_id, stop_id, departure_time)`,
+        );
+        await qr.query(
+          `CREATE INDEX idx_stop_times_agency_trip_seq_new ON stop_times_new (agency_id, trip_id, stop_sequence)`,
+        );
+        await qr.query(`RESET maintenance_work_mem`);
+      } finally {
+        await qr.release();
+      }
       this.logger.log(`✓ stop_times indexes built`);
 
       // 11. CLUSTER stop_times_new (if enabled) — physically reorders heap for sequential I/O.
@@ -420,7 +429,14 @@ export class GtfsStaticService {
       );
       this.logger.log(`✓ Orphan stops pruned: ${pruneResult[0]?.count ?? 0}`);
 
-      // 13. Atomic rename — shadow tables replace live tables in a single DDL transaction.
+      // 13. Convert UNLOGGED shadow tables back to LOGGED before swap.
+      // UNLOGGED is safe during bulk load (no WAL, no crash recovery needed for shadow tables),
+      // but the property persists through RENAME — leaving the promoted live tables UNLOGGED
+      // would truncate them on crash recovery and destroy all production data.
+      await q(`ALTER TABLE stop_times_new SET LOGGED`).catch(() => {});
+      await q(`ALTER TABLE shapes_new SET LOGGED`).catch(() => {});
+
+      // 14. Atomic rename — shadow tables replace live tables in a single DDL transaction.
       // Live tables remain fully queryable right up until this commit (milliseconds).
       this.logger.debug(`Swapping shadow tables into place (atomic rename)...`);
       await this.swapTables(q);
@@ -626,6 +642,17 @@ export class GtfsStaticService {
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
+      // Compensate Phase 1: restore the parked index names so the live table indexes
+      // keep their expected names after a failed swap. Uses IF EXISTS + .catch so a
+      // partially-complete rename or missing index never masks the original error.
+      for (const [from, to] of [
+        ['idx_stop_times_agency_stop_dept_old', 'idx_stop_times_agency_stop_dept'],
+        ['idx_stop_times_agency_trip_seq_old', 'idx_stop_times_agency_trip_seq'],
+        ['idx_stops_stop_name_trgm_old', 'idx_stops_stop_name_trgm'],
+        ['idx_stops_stop_code_trgm_old', 'idx_stops_stop_code_trgm'],
+      ] as [string, string][]) {
+        await q(`ALTER INDEX IF EXISTS "${from}" RENAME TO "${to}"`).catch(() => {});
+      }
       throw err;
     } finally {
       client.release();
