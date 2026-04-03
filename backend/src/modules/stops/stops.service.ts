@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Stop } from './entities/stop.entity';
@@ -193,8 +193,11 @@ export class StopsService {
       `SELECT "agencyId", timezone FROM agencies WHERE agency_key = $1 LIMIT 1`,
       [agencyKey],
     );
-    const timezone = agRow?.timezone ?? 'UTC';
-    const agencyId: string = agRow?.agencyId;
+    if (!agRow) {
+      throw new NotFoundException(`Agency not found for agencyKey: ${agencyKey}`);
+    }
+    const timezone = agRow.timezone;
+    const agencyId: string = agRow.agencyId;
 
     // Resolve stop metadata and detect whether this is a parent station.
     // Parent stations (e.g. place-asmnl) have no stop_times of their own; their

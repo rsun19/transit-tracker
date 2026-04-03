@@ -144,26 +144,7 @@ export default function StopDeparturesPage() {
       )}
 
       {!loading && !error && departures.length > 0 && !isGrouped && (
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small" aria-label="Departure schedule">
-            <TableHead>
-              <TableRow>
-                <TableCell>Route</TableCell>
-                <TableCell>Destination</TableCell>
-                <TableCell>Departs</TableCell>
-                <TableCell>Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {departures.map((dep, i) => (
-                <DepartureRow
-                  key={`${dep.routeId}-${dep.scheduledDeparture}-${i}`}
-                  departure={dep}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <DepartureTable title="All Departures" deps={departures} />
       )}
 
       {!loading && !error && departures.length > 0 && isGrouped && (

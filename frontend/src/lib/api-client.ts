@@ -173,17 +173,6 @@ export function fetchStopDepartures(
   );
 }
 
-export function fetchStopRoutes(
-  stopId: string,
-  agencyKey: string,
-): Promise<{
-  data: { routeId: string; shortName: string | null; longName: string | null; routeType: number }[];
-}> {
-  return apiFetch(
-    `/stops/${encodeURIComponent(stopId)}/routes?agencyKey=${encodeURIComponent(agencyKey)}`,
-  );
-}
-
 export function fetchTrip(tripId: string, agencyKey: string): Promise<Trip> {
   return apiFetch<Trip>(
     `/trips/${encodeURIComponent(tripId)}?agencyKey=${encodeURIComponent(agencyKey)}`,

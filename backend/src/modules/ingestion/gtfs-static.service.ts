@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import fetch from 'node-fetch';
@@ -31,6 +32,7 @@ export class GtfsStaticService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly agenciesService: AgenciesService,
+    private readonly configService: ConfigService,
   ) {}
 
   async ingestAgency(agencyConfig: ResolvedAgency): Promise<void> {
@@ -236,8 +238,8 @@ export class GtfsStaticService {
     // per-row B-tree maintenance cost for 1.4M rows. We rebuild them in a single
     // sort-based pass after COPY — typically 3-5x faster than incremental updates.
     this.logger.debug(`Dropping stop_times secondary indexes for bulk-load...`);
-    await q(`DROP INDEX IF EXISTS "IDX_90e1b72ddc98b28eb3e6fa82a2"`).catch(() => {});
-    await q(`DROP INDEX IF EXISTS "IDX_66ad0335971b1c9ee60116abf2"`).catch(() => {});
+    await q(`DROP INDEX IF EXISTS idx_stop_times_agency_stop_dept`);
+    await q(`DROP INDEX IF EXISTS idx_stop_times_agency_trip_seq`);
 
     // Drop GIN trigram indexes on stops before INSERT — GIN indexes are expensive to
     // update incrementally (they fan out into many posting list entries per row).
@@ -304,8 +306,12 @@ export class GtfsStaticService {
     // Rebuild GIN trigram indexes now that all stops are inserted — single-pass
     // build is far cheaper than per-row GIN updates during INSERT.
     this.logger.debug(`Rebuilding stop GIN trigram indexes...`);
-    await q(`CREATE INDEX idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`);
-    await q(`CREATE INDEX idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
+    );
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
+    );
     this.logger.log(`✓ Stop GIN trigram indexes rebuilt`);
 
     // 5. Insert trips — 8 params per row
@@ -352,10 +358,10 @@ export class GtfsStaticService {
     this.logger.debug(`Rebuilding stop_times indexes (single-pass sort-based build)...`);
     await q(`SET maintenance_work_mem = '256MB'`);
     await q(
-      `CREATE INDEX "IDX_90e1b72ddc98b28eb3e6fa82a2" ON stop_times (agency_id, stop_id, departure_time)`,
+      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
     );
     await q(
-      `CREATE INDEX "IDX_66ad0335971b1c9ee60116abf2" ON stop_times (agency_id, trip_id, stop_sequence)`,
+      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
     );
     await q(`RESET maintenance_work_mem`);
     this.logger.log(`✓ stop_times indexes rebuilt`);
@@ -364,9 +370,18 @@ export class GtfsStaticService {
     // index. This converts per-stop queries from random I/O across the heap into
     // sequential page reads — critical for high-frequency stops with thousands of
     // stop_times rows scattered across many pages.
-    this.logger.debug(`Clustering stop_times on stop_id index (may take ~2 minutes)...`);
-    await q(`CLUSTER stop_times USING "IDX_90e1b72ddc98b28eb3e6fa82a2"`);
-    this.logger.log(`✓ stop_times clustered`);
+    // WARNING: CLUSTER takes an ACCESS EXCLUSIVE lock that blocks all reads and writes
+    // for ~2 minutes on a full MBTA dataset. Enable only during a maintenance window
+    // by setting GTFS_CLUSTER_STOP_TIMES=true in .env (defaults to off).
+    if (this.configService.get<string>('GTFS_CLUSTER_STOP_TIMES') === 'true') {
+      this.logger.debug(`Clustering stop_times on stop_id index (may take ~2 minutes)...`);
+      await q(`CLUSTER stop_times USING idx_stop_times_agency_stop_dept`);
+      this.logger.log(`✓ stop_times clustered`);
+    } else {
+      this.logger.log(
+        `Skipping CLUSTER (set GTFS_CLUSTER_STOP_TIMES=true to enable — takes ACCESS EXCLUSIVE lock ~2 min)`,
+      );
+    }
 
     // Prune stops that have no stop_times and are not referenced as a parent station.
     // GTFS parent-station stops (location_type=1) have no stop_times of their own but
