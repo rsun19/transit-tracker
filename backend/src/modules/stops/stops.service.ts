@@ -42,6 +42,7 @@ export interface DepartureResponse {
   scheduledDeparture: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
+  directionId: number | null;
 }
 
 @Injectable()
@@ -65,67 +66,96 @@ export class StopsService {
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as { data: StopResponse[]; total: number };
 
-    // Build parameterised queries dynamically based on whether agencyKey is supplied.
+    // GIN-friendly query: scalar subquery for agency lets Postgres use the trigram
+    // index on stop_name/stop_code directly. COUNT(*) OVER() removes the second
+    // round-trip that was needed for pagination totals.
     const likeQ = `%${q}%`;
-    const dataParams: unknown[] = [likeQ];
-    const countParams: unknown[] = [likeQ];
-    const agencyClause = agencyKey ? `AND a.agency_key = $${dataParams.push(agencyKey)}` : '';
-    // agencyKey occupies same positional slot in count query
-    if (agencyKey) countParams.push(agencyKey);
-    const limitParam = dataParams.push(cappedLimit);
-    const offsetParam = dataParams.push(offset);
+    const params: unknown[] = [likeQ];
+    const agencyFilter = agencyKey
+      ? `AND s.agency_id = (SELECT "agencyId" FROM agencies WHERE agency_key = $${params.push(agencyKey)} LIMIT 1)`
+      : '';
+    const limitSlot = params.push(cappedLimit);
+    const offsetSlot = params.push(offset);
 
-    const [rows, countRows] = await Promise.all([
-      this.dataSource.query<
+    // Step 1: paginated stop filter — fast seq/GIN scan, no route subquery.
+    // Filter to parent_station_id IS NULL so we return one entry per station:
+    // - parent stations (e.g. place-asmnl) represent the full station hub
+    // - standalone stops (bus stops, etc.) have no parent and are returned as-is
+    // Directional platform stops (e.g. stop 70088 / 70089) are suppressed here;
+    // their departures are shown split by direction on the station detail page.
+    const stopRows = await this.dataSource.query<
+      Array<{
+        id: string;
+        stop_id: string;
+        stop_name: string;
+        stop_code: string | null;
+        wheelchair_boarding: number | null;
+        lat: string;
+        lon: string;
+        total_count: string;
+        agency_id: string;
+      }>
+    >(
+      `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
+              ST_Y(s.location::geometry) AS lat,
+              ST_X(s.location::geometry) AS lon,
+              COUNT(*) OVER() AS total_count,
+              s.agency_id
+       FROM stops s
+       WHERE (s.stop_name ILIKE $1 OR s.stop_code ILIKE $1)
+         AND (s.parent_station_id IS NULL OR s.parent_station_id = '')
+         ${agencyFilter}
+       ORDER BY s.stop_name ASC
+       LIMIT $${limitSlot} OFFSET $${offsetSlot}`,
+      params,
+    );
+
+    // Step 2: batch-fetch all routes for the returned stop IDs in ONE query.
+    // Parent stations have no stop_times of their own, so we also look up routes
+    // through their children via parent_station_id. COALESCE maps each row to the
+    // canonical "group" stop_id (parent station or standalone stop) so the result
+    // map aligns with the stop_ids returned in step 1.
+    const routesByStopId = new Map<string, StopRouteRef[]>();
+    if (stopRows.length > 0) {
+      const stopIdList = stopRows.map((r) => r.stop_id);
+      const agencyId = stopRows[0].agency_id;
+      const routeRows = await this.dataSource.query<
         Array<{
-          id: string;
-          stop_id: string;
-          stop_name: string;
-          stop_code: string | null;
-          wheelchair_boarding: number | null;
-          lat: string;
-          lon: string;
-          routes: StopRouteRef[] | null;
+          group_stop_id: string;
+          routeId: string;
+          shortName: string | null;
+          longName: string | null;
+          routeType: number;
         }>
       >(
-        `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
-                ST_Y(s.location::geometry) AS lat,
-                ST_X(s.location::geometry) AS lon,
-                COALESCE(
-                  (SELECT json_agg(r)
-                   FROM (
-                     SELECT DISTINCT r2.route_id AS "routeId",
-                                     r2.short_name AS "shortName",
-                                     r2.long_name AS "longName",
-                                     r2.route_type AS "routeType"
-                     FROM stop_times st2
-                     JOIN trips t2 ON t2.trip_id = st2.trip_id AND t2.agency_id = st2.agency_id
-                     JOIN routes r2 ON r2.route_id = t2.route_id AND r2.agency_id = t2.agency_id
-                     WHERE st2.stop_id = s.stop_id AND st2.agency_id = s.agency_id
-                     ORDER BY r2.short_name ASC
-                   ) r),
-                  '[]'::json
-                ) AS routes
-         FROM stops s
-         JOIN agencies a ON a."agencyId" = s.agency_id
-         WHERE (s.stop_name ILIKE $1 OR s.stop_code ILIKE $1)
-           ${agencyClause}
-         ORDER BY s.stop_name ASC
-         LIMIT $${limitParam} OFFSET $${offsetParam}`,
-        dataParams,
-      ),
-      this.dataSource.query<[{ total: string }]>(
-        `SELECT COUNT(*)::text AS total
-         FROM stops s
-         JOIN agencies a ON a."agencyId" = s.agency_id
-         WHERE (s.stop_name ILIKE $1 OR s.stop_code ILIKE $1)
-           ${agencyKey ? `AND a.agency_key = $2` : ''}`,
-        countParams,
-      ),
-    ]);
+        `SELECT DISTINCT
+                COALESCE(child_s.parent_station_id, st2.stop_id) AS group_stop_id,
+                r2.route_id  AS "routeId",
+                r2.short_name AS "shortName",
+                r2.long_name  AS "longName",
+                r2.route_type AS "routeType"
+         FROM stop_times st2
+         JOIN stops child_s ON child_s.stop_id = st2.stop_id AND child_s.agency_id = st2.agency_id
+         JOIN trips t2  ON t2.trip_id   = st2.trip_id  AND t2.agency_id  = st2.agency_id
+         JOIN routes r2 ON r2.route_id  = t2.route_id  AND r2.agency_id  = t2.agency_id
+         WHERE st2.agency_id = $2
+           AND (st2.stop_id = ANY($1) OR child_s.parent_station_id = ANY($1))
+         ORDER BY group_stop_id, r2.short_name ASC`,
+        [stopIdList, agencyId],
+      );
+      for (const row of routeRows) {
+        if (!routesByStopId.has(row.group_stop_id)) routesByStopId.set(row.group_stop_id, []);
+        routesByStopId.get(row.group_stop_id)!.push({
+          routeId: row.routeId,
+          shortName: row.shortName,
+          longName: row.longName,
+          routeType: row.routeType,
+        });
+      }
+    }
 
-    const total = parseInt(countRows[0]?.total ?? '0', 10);
-    const data: StopResponse[] = rows.map((row) => ({
+    const total = stopRows.length > 0 ? parseInt(stopRows[0].total_count, 10) : 0;
+    const data: StopResponse[] = stopRows.map((row) => ({
       id: row.id,
       stopId: row.stop_id,
       stopName: row.stop_name,
@@ -133,7 +163,7 @@ export class StopsService {
       lat: parseFloat(row.lat),
       lon: parseFloat(row.lon),
       wheelchairBoarding: row.wheelchair_boarding,
-      routes: row.routes ?? [],
+      routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
     const result = { data, total };
@@ -146,20 +176,54 @@ export class StopsService {
     agencyKey: string,
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
-  ): Promise<{ data: DepartureResponse[]; stopId: string; agencyKey: string }> {
+  ): Promise<{ data: DepartureResponse[]; stopId: string; agencyKey: string; stopName: string }> {
     const cacheKey = `cache:departures:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached)
-      return JSON.parse(cached) as { data: DepartureResponse[]; stopId: string; agencyKey: string };
+      return JSON.parse(cached) as {
+        data: DepartureResponse[];
+        stopId: string;
+        agencyKey: string;
+        stopName: string;
+      };
 
-    // All date/time filtering is performed in the agency's own timezone so that
-    // "today" and "now" are always consistent with the transit service day —
-    // regardless of where the DB server or the client is located.
-    //
-    // We evaluate two candidate service dates — today and yesterday (in the
-    // agency's timezone) — so that GTFS post-midnight trips (e.g.
-    // departure_time = '25:30:00') scheduled under yesterday's service day but
-    // whose UTC instant is still in the future are included in results.
+    // Resolve agency once so we can use agencyId (UUID) directly in all SQL below —
+    // avoids repeated agency_key subquery lookups inside CTEs.
+    const [agRow] = await this.dataSource.query<Array<{ agencyId: string; timezone: string }>>(
+      `SELECT "agencyId", timezone FROM agencies WHERE agency_key = $1 LIMIT 1`,
+      [agencyKey],
+    );
+    const timezone = agRow?.timezone ?? 'UTC';
+    const agencyId: string = agRow?.agencyId;
+
+    // Resolve stop metadata and detect whether this is a parent station.
+    // Parent stations (e.g. place-asmnl) have no stop_times of their own; their
+    // child platform stops (e.g. 70088, 70089) carry the actual departure rows.
+    // We aggregate child stop_ids so a single departures query covers the whole
+    // station, and return departures tagged with direction_id for the frontend to
+    // render Inbound / Outbound tables.
+    const [stopInfo] = await this.dataSource.query<
+      Array<{ stop_name: string; child_stop_ids: string[] | null }>
+    >(
+      `SELECT s.stop_name,
+              ARRAY_AGG(c.stop_id) FILTER (WHERE c.stop_id IS NOT NULL) AS child_stop_ids
+       FROM stops s
+       LEFT JOIN stops c ON c.parent_station_id = s.stop_id AND c.agency_id = s.agency_id
+       WHERE s.stop_id = $1 AND s.agency_id = $2
+       GROUP BY s.stop_name`,
+      [stopId, agencyId],
+    );
+    const stopName: string = stopInfo?.stop_name ?? stopId;
+    const childStopIds = stopInfo?.child_stop_ids;
+    // If this stop is a parent station, query all children; otherwise query itself.
+    const effectiveStopIds: string[] =
+      childStopIds && childStopIds.length > 0 ? childStopIds : [stopId];
+
+    // en-CA locale produces YYYY-MM-DD strings without JSON.stringify overhead
+    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    const todayStr = dateFmt.format(new Date());
+    const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
+
     const rows = await this.dataSource.query<
       Array<{
         trip_id: string;
@@ -168,39 +232,52 @@ export class StopsService {
         long_name: string | null;
         trip_headsign: string | null;
         departure_time: string;
-        agency_timezone: string;
+        direction_id: number | null;
       }>
     >(
-      `SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-              ((cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone AT TIME ZONE 'UTC')::text || 'Z' AS departure_time,
-              a.timezone AS agency_timezone
-       FROM stop_times st
-       JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
-       JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
-       JOIN service_calendars sc ON sc.service_id = t.service_id AND sc.agency_id = t.agency_id
-       JOIN agencies a ON a."agencyId" = st.agency_id
-       CROSS JOIN LATERAL (
-         SELECT (NOW() AT TIME ZONE a.timezone)::date AS candidate_date
-         UNION ALL
-         SELECT (NOW() AT TIME ZONE a.timezone)::date - INTERVAL '1 day'
-       ) AS cd
-       WHERE st.stop_id = $1
-         AND a.agency_key = $2
-         AND CASE EXTRACT(DOW FROM cd.candidate_date)::int
-               WHEN 0 THEN sc.sunday
-               WHEN 1 THEN sc.monday
-               WHEN 2 THEN sc.tuesday
-               WHEN 3 THEN sc.wednesday
-               WHEN 4 THEN sc.thursday
-               WHEN 5 THEN sc.friday
-               WHEN 6 THEN sc.saturday
-             END = true
-         AND sc.start_date <= cd.candidate_date
-         AND sc.end_date   >= cd.candidate_date
-         AND (cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone >= NOW()
-       ORDER BY (cd.candidate_date + st.departure_time)::timestamp AT TIME ZONE a.timezone ASC
-       LIMIT $3`,
-      [stopId, agencyKey, Math.min(limit, MAX_SEARCH_LIMIT)],
+      // stop_slice uses ANY($1) to cover all effective stop_ids in one index scan.
+      // today_services is now keyed on agencyId ($2 UUID) directly, removing the
+      // inner agency_key subquery that was needed when stopId was the only input.
+      `WITH stop_slice AS MATERIALIZED (
+         SELECT st.trip_id, st.agency_id, st.departure_time
+         FROM stop_times st
+         WHERE st.stop_id = ANY($1) AND st.agency_id = $2
+       ),
+       today_services AS MATERIALIZED (
+         SELECT sc.service_id, sc.agency_id, cand.d
+         FROM service_calendars sc
+         CROSS JOIN (VALUES ($3::date), ($4::date)) AS cand(d)
+         WHERE sc.agency_id = $2
+           AND sc.start_date <= cand.d
+           AND sc.end_date   >= cand.d
+           AND CASE EXTRACT(DOW FROM cand.d)::int
+                 WHEN 0 THEN sc.sunday
+                 WHEN 1 THEN sc.monday
+                 WHEN 2 THEN sc.tuesday
+                 WHEN 3 THEN sc.wednesday
+                 WHEN 4 THEN sc.thursday
+                 WHEN 5 THEN sc.friday
+                 WHEN 6 THEN sc.saturday
+               END = true
+       )
+       SELECT ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
+              t.direction_id,
+              ((ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS departure_time
+       FROM stop_slice ss
+       JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
+       JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
+       JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
+       WHERE (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 >= NOW()
+       ORDER BY (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 ASC
+       LIMIT $6`,
+      [
+        effectiveStopIds,
+        agencyId,
+        todayStr,
+        yesterdayStr,
+        timezone,
+        Math.min(limit, MAX_SEARCH_LIMIT),
+      ],
     );
 
     const data: DepartureResponse[] = rows.map((row) => ({
@@ -212,9 +289,10 @@ export class StopsService {
       scheduledDeparture: row.departure_time,
       realtimeDelaySeconds: null,
       hasRealtime: false,
+      directionId: row.direction_id ?? null,
     }));
 
-    const result = { data, stopId, agencyKey };
+    const result = { data, stopId, agencyKey, stopName };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_DEPARTURES_TTL_S);
     return result;
   }

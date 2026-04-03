@@ -296,11 +296,23 @@ transit-tracker/
 
 ## Troubleshooting
 
-| Symptom                                          | Likely cause                          | Fix                                                                                                           |
-| ------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `transit-backend` exits with `ECONNREFUSED`      | Postgres not ready yet                | Wait 30 s; health check retries automatically                                                                 |
-| Worker logs "feed download failed"               | Invalid URL or missing API key        | Check `.env`; verify the URL is reachable from inside the container (`docker compose exec worker curl <url>`) |
-| Frontend shows "No data available yet"           | Ingestion hasn't finished             | Check `docker compose logs worker` and wait for the ingest to complete                                        |
-| HTTP 429 from `/api/`                            | Rate limit hit                        | Slow down requests; limit is 1 req/s sustained, burst 10 per IP                                               |
-| Map shows no vehicle markers                     | Realtime feed disabled or unreachable | Check `gtfsRealtimeUrl` in `config/agencies.json`; check worker logs                                          |
-| `docker compose up` fails on `permission denied` | Docker socket not accessible          | Ensure Docker Desktop is running and your user is in the `docker` group                                       |
+| Symptom                                          | Likely cause                              | Fix                                                                                                                            |
+| ------------------------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `transit-backend` exits with `ECONNREFUSED`      | Postgres not ready yet                    | Wait 30 s; health check retries automatically                                                                                  |
+| Worker logs "feed download failed"               | Invalid URL or missing API key            | Check `.env`; verify the URL is reachable from inside the container (`docker compose exec worker curl <url>`)                  |
+| Frontend shows "No data available yet"           | Ingestion hasn't finished                 | Check `docker compose logs worker` and wait for the ingest to complete                                                         |
+| HTTP 429 from `/api/`                            | Rate limit hit                            | Slow down requests; limit is 1 req/s sustained, burst 10 per IP                                                                |
+| Map shows no vehicle markers                     | Realtime feed disabled or unreachable     | Check `gtfsRealtimeUrl` in `config/agencies.json`; check worker logs                                                           |
+| `docker compose up` fails on `permission denied` | Docker socket not accessible              | Ensure Docker Desktop is running and your user is in the `docker` group                                                        |
+| Stop search returns empty (`data: []`)           | `parent_station_id` stored as `''`        | Query must use `IS NULL OR = ''`; a plain `IS NULL` misses blank CSV fields ingested as empty strings                          |
+| Route detail only shows one branch               | Arbitrary trip selected by `trip_id` sort | `findOne()` must use `DISTINCT ON (trip_headsign) ORDER BY trip_headsign, stop_count DESC` to pick the longest trip per branch |
+
+### Worker container picks up stale environment variables
+
+Docker bakes environment variables into the container image at creation time. `docker compose restart worker` does **not** re-read `.env`. After changing any `GTFS_*` variable you must recreate the container:
+
+```sh
+docker compose -f docker-compose.dev.yml up -d worker
+```
+
+This is especially important for `GTFS_INGEST_ON_STARTUP` — if `true` is baked in and the worker runs in NestJS watch mode, every file-save will restart the process and trigger a fresh ingest, wiping `stop_times` mid-run.

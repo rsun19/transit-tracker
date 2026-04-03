@@ -62,6 +62,8 @@ One row per configured transit provider.
 
 **Indexes**: `UNIQUE (agency_id, stop_id)` · `GiST INDEX (location)` — required for PostGIS spatial queries · `INDEX (agency_id, stop_code)`
 
+> **Stop hierarchy note**: GTFS uses a parent/child stop model. `parent_station_id` is blank (`''`) for top-level parent stations and standalone stops; child platform stops (e.g. individual subway platforms) carry their parent's `stop_id`. Because blank CSV fields are ingested as empty strings rather than SQL `NULL`, queries that need to identify parent/standalone stops must check `parent_station_id IS NULL OR parent_station_id = ''`.
+
 ### `trips`
 
 | Column                  | Type           | Constraints                                      |
