@@ -22,8 +22,6 @@ RUN npm run build
 FROM node:20-alpine AS production
 WORKDIR /app/frontend
 
-RUN apk add --no-cache curl
-
 ENV NODE_ENV=production
 ENV PORT=3001
 
