@@ -19,6 +19,8 @@ RUN npm run build
 FROM node:20-alpine AS production
 WORKDIR /app/backend
 
+RUN apk add --no-cache curl
+
 COPY --from=builder /app/backend/dist ./dist
 COPY --from=builder /app/backend/package.json ./
 
