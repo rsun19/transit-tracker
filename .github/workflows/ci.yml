@@ -387,4 +387,8 @@ jobs:
             fi
 
             docker compose up -d --remove-orphans
+
+            # Ensure pg_trgm extension exists (idempotent — safe on every deploy)
+            docker exec transit-tracker-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"'
+
             docker image prune -f
