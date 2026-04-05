@@ -310,8 +310,8 @@ jobs:
           file: backend/Dockerfile
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-backend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and push worker
         uses: docker/build-push-action@v6
@@ -320,8 +320,8 @@ jobs:
           file: backend/Dockerfile.worker
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-worker:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
 
       - name: Build and push frontend
         uses: docker/build-push-action@v6
@@ -331,8 +331,8 @@ jobs:
           build-args: BACKEND_URL=http://backend:3000
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/transit-tracker-frontend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
       - name: Copy deployment files to server
         uses: appleboy/scp-action@v0.1.7
