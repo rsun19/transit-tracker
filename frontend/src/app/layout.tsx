@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Providers } from '@/lib/providers';
 import { Header } from '@/components/ui/Header';
+import 'leaflet/dist/leaflet.css';
 
 export const metadata: Metadata = {
   title: 'Transit Tracker',
