@@ -127,6 +127,53 @@ export function reconcileAddedTrips(
   return departures;
 }
 
+/** Radius in degrees used to consider two bus stops as co-located (~150 m). */
+export const STOP_MERGE_RADIUS_DEG = 150 / 111_320;
+
+/**
+ * Merge co-located bus stops in a search result list.
+ *
+ * Two stops are merged when they share the same `stopName`, are within
+ * `STOP_MERGE_RADIUS_DEG` of each other, AND share at least one route.
+ * The first stop in each group is kept as the canonical entry; its route list
+ * becomes the union of all merged stops' routes (deduped by routeId).
+ */
+export function mergeColocatedStops(stops: StopResponse[]): StopResponse[] {
+  const merged: StopResponse[] = [];
+  const consumed = new Set<string>();
+
+  for (const stop of stops) {
+    if (consumed.has(stop.stopId)) continue;
+    const stopRouteIds = new Set((stop.routes ?? []).map((r) => r.routeId));
+
+    const group = stops.filter((other) => {
+      if (other.stopId === stop.stopId) return true;
+      if (consumed.has(other.stopId)) return false;
+      if (other.stopName !== stop.stopName) return false;
+      const dLat = other.lat - stop.lat;
+      const dLon = other.lon - stop.lon;
+      if (Math.sqrt(dLat * dLat + dLon * dLon) > STOP_MERGE_RADIUS_DEG) return false;
+      return (other.routes ?? []).some((r) => stopRouteIds.has(r.routeId));
+    });
+
+    const seenRouteIds = new Set<string>();
+    const mergedRoutes: StopRouteRef[] = [];
+    for (const g of group) {
+      for (const r of g.routes ?? []) {
+        if (!seenRouteIds.has(r.routeId)) {
+          seenRouteIds.add(r.routeId);
+          mergedRoutes.push(r);
+        }
+      }
+    }
+    mergedRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
+    for (const g of group) consumed.add(g.stopId);
+    merged.push({ ...stop, routes: mergedRoutes });
+  }
+
+  return merged;
+}
+
 @Injectable()
 export class StopsService {
   constructor(
@@ -257,40 +304,7 @@ export class StopsService {
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
-    // Merge co-located stops: same name + within 150m + share ≥1 route.
-    // This handles bus stops where inbound/outbound platforms are separate GTFS
-    // entries with no parent_station_id but represent the same physical corner.
-    const MERGE_RADIUS_DEG = 150 / 111_320; // ~150m in degrees
-    const merged: StopResponse[] = [];
-    const consumed = new Set<string>();
-    for (const stop of rawData) {
-      if (consumed.has(stop.stopId)) continue;
-      const stopRouteIds = new Set((stop.routes ?? []).map((r) => r.routeId));
-      const group = rawData.filter((other) => {
-        if (other.stopId === stop.stopId) return true;
-        if (consumed.has(other.stopId)) return false;
-        if (other.stopName !== stop.stopName) return false;
-        const dLat = other.lat - stop.lat;
-        const dLon = other.lon - stop.lon;
-        if (Math.sqrt(dLat * dLat + dLon * dLon) > MERGE_RADIUS_DEG) return false;
-        return (other.routes ?? []).some((r) => stopRouteIds.has(r.routeId));
-      });
-      // Union routes from all grouped stops, deduplicating by routeId
-      const seenRouteIds = new Set<string>();
-      const mergedRoutes: StopRouteRef[] = [];
-      for (const g of group) {
-        for (const r of g.routes ?? []) {
-          if (!seenRouteIds.has(r.routeId)) {
-            seenRouteIds.add(r.routeId);
-            mergedRoutes.push(r);
-          }
-        }
-      }
-      mergedRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
-      for (const g of group) consumed.add(g.stopId);
-      merged.push({ ...stop, routes: mergedRoutes });
-    }
-    const data = merged;
+    const data = mergeColocatedStops(rawData);
 
     // Sort search results by the "best" mode at each stop:
     //   0 → Subway/Metro (route_type 1)

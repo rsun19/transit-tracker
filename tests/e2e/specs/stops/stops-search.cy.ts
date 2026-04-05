@@ -88,3 +88,43 @@ describe('Stops search — route chip labels', () => {
     cy.contains('Orange Line').should('be.visible');
   });
 });
+
+describe('Stops search — co-located stop merging', () => {
+  const makeStop = (stopId: string, routes: unknown[]) => ({
+    id: stopId,
+    stopId,
+    stopName: 'Washington St @ Tufts Med Ctr',
+    stopCode: null,
+    lat: 42.335,
+    lon: -71.072,
+    wheelchairBoarding: null,
+    routes,
+  });
+
+  it('shows only one result when the API returns already-merged stops', () => {
+    cy.intercept('GET', '/api/v1/stops**', {
+      statusCode: 200,
+      body: {
+        data: [
+          makeStop('stop-merged', [
+            { routeId: '11', shortName: '11', longName: 'Route 11', routeType: 3 },
+            { routeId: '15', shortName: '15', longName: 'Route 15', routeType: 3 },
+            { routeId: 'SL4', shortName: 'SL4', longName: 'Silver Line 4', routeType: 3 },
+            { routeId: 'SL5', shortName: 'SL5', longName: 'Silver Line 5', routeType: 3 },
+          ]),
+        ],
+        total: 1,
+      },
+    }).as('stops');
+
+    cy.visit('/stops');
+    cy.get('input[placeholder="e.g. Park Street, Silver Line Way"]').type('Washington');
+    cy.wait('@stops');
+
+    cy.contains('Washington St @ Tufts Med Ctr').should('have.length', 1);
+    cy.contains('11').should('be.visible');
+    cy.contains('15').should('be.visible');
+    cy.contains('SL4').should('be.visible');
+    cy.contains('SL5').should('be.visible');
+  });
+});
