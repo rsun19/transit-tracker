@@ -144,7 +144,7 @@ export class StopsService {
     offset = 0,
   ): Promise<{ data: StopResponse[]; total: number }> {
     const cappedLimit = Math.min(limit, MAX_SEARCH_LIMIT);
-    const cacheKey = `cache:stops:search:${agencyKey ?? 'all'}:${q}:${cappedLimit}:${offset}`;
+    const cacheKey = `cache:stops:search:v3:${agencyKey ?? 'all'}:${q}:${cappedLimit}:${offset}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as { data: StopResponse[]; total: number };
 
@@ -246,7 +246,7 @@ export class StopsService {
     }
 
     const total = stopRows.length > 0 ? parseInt(stopRows[0].total_count, 10) : 0;
-    const data: StopResponse[] = stopRows.map((row) => ({
+    const rawData: StopResponse[] = stopRows.map((row) => ({
       id: row.id,
       stopId: row.stop_id,
       stopName: row.stop_name,
@@ -256,6 +256,41 @@ export class StopsService {
       wheelchairBoarding: row.wheelchair_boarding,
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
+
+    // Merge co-located stops: same name + within 150m + share ≥1 route.
+    // This handles bus stops where inbound/outbound platforms are separate GTFS
+    // entries with no parent_station_id but represent the same physical corner.
+    const MERGE_RADIUS_DEG = 150 / 111_320; // ~150m in degrees
+    const merged: StopResponse[] = [];
+    const consumed = new Set<string>();
+    for (const stop of rawData) {
+      if (consumed.has(stop.stopId)) continue;
+      const stopRouteIds = new Set((stop.routes ?? []).map((r) => r.routeId));
+      const group = rawData.filter((other) => {
+        if (other.stopId === stop.stopId) return true;
+        if (consumed.has(other.stopId)) return false;
+        if (other.stopName !== stop.stopName) return false;
+        const dLat = other.lat - stop.lat;
+        const dLon = other.lon - stop.lon;
+        if (Math.sqrt(dLat * dLat + dLon * dLon) > MERGE_RADIUS_DEG) return false;
+        return (other.routes ?? []).some((r) => stopRouteIds.has(r.routeId));
+      });
+      // Union routes from all grouped stops, deduplicating by routeId
+      const seenRouteIds = new Set<string>();
+      const mergedRoutes: StopRouteRef[] = [];
+      for (const g of group) {
+        for (const r of g.routes ?? []) {
+          if (!seenRouteIds.has(r.routeId)) {
+            seenRouteIds.add(r.routeId);
+            mergedRoutes.push(r);
+          }
+        }
+      }
+      mergedRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
+      for (const g of group) consumed.add(g.stopId);
+      merged.push({ ...stop, routes: mergedRoutes });
+    }
+    const data = merged;
 
     // Sort search results by the "best" mode at each stop:
     //   0 → Subway/Metro (route_type 1)
@@ -285,7 +320,7 @@ export class StopsService {
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
   ): Promise<{ data: DepartureResponse[]; stopId: string; agencyKey: string; stopName: string }> {
-    const cacheKey = `cache:departures:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
+    const cacheKey = `cache:departures:v2:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached)
       return JSON.parse(cached) as {
@@ -346,8 +381,18 @@ export class StopsService {
       );
       effectiveStopIds = siblingRows.length > 0 ? siblingRows.map((r) => r.stop_id) : [stopId];
     } else {
-      // Standalone stop — query only itself.
-      effectiveStopIds = [stopId];
+      // Standalone bus stop (no parent station). Find co-located stops — same name
+      // within ~150m — so both inbound and outbound platforms are included.
+      const neighborRows = await this.dataSource.query<Array<{ stop_id: string }>>(
+        `SELECT stop_id FROM stops
+         WHERE stop_name = $1
+           AND agency_id = $2
+           AND ST_DWithin(location::geography,
+                          (SELECT location::geography FROM stops WHERE stop_id = $3 AND agency_id = $2 LIMIT 1),
+                          150)`,
+        [stopName, agencyId, stopId],
+      );
+      effectiveStopIds = neighborRows.length > 0 ? neighborRows.map((r) => r.stop_id) : [stopId];
     }
 
     // en-CA locale produces YYYY-MM-DD strings without JSON.stringify overhead
