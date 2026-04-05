@@ -80,14 +80,14 @@ NestJS 10 application. Serves the REST API at `/api/v1`. Modules:
 
 #### Branching route detection (`GET /routes/:id`)
 
-Some routes fork into multiple terminal branches (e.g. the MBTA Red Line splits into Ashmont and Braintree branches). The route detail endpoint detects this automatically:
+Some routes fork into multiple terminal branches (e.g. the MBTA Red Line splits into Ashmont and Braintree branches), and routes may also have distinct inbound and outbound destinations (e.g. route 713: two outbound headsigns, one inbound headsign). The route detail endpoint detects all of this automatically:
 
-1. All trips for `direction_id = 0` are grouped by `trip_headsign` (the destination sign).
-2. `DISTINCT ON (trip_headsign)` with `ORDER BY trip_headsign, stop_count DESC` selects the longest representative trip per unique headsign — one per branch.
-3. The response includes a `branches` array, each element containing `label` (the headsign), `directionId`, and the ordered `stops` list for that branch.
+1. All trips for the route across **both** `direction_id = 0` and `direction_id = 1` are grouped by `(direction_id, trip_headsign)`.
+2. `DISTINCT ON (direction_id, trip_headsign)` with `ORDER BY direction_id, trip_headsign, stop_count DESC` selects the longest representative trip per unique `(direction, headsign)` pair.
+3. The response includes a `branches` array, each element containing `label` (the headsign), `directionId` (0 = outbound, 1 = inbound), and the ordered `stops` list for that branch.
 4. The flat `stops` field (longest single branch) is preserved for backward compatibility.
 
-The frontend renders branches side-by-side in a two-column grid when `branches.length > 1`.
+The frontend renders all branches in a responsive grid when `branches.length > 1`.
 
 #### Stop search hierarchy (`GET /stops`)
 
@@ -98,7 +98,19 @@ GTFS feeds use a parent/child stop hierarchy:
 
 The search endpoint filters to `parent_station_id IS NULL OR parent_station_id = ''` to return one result per station rather than one per platform. Note: GTFS blank CSV fields are ingested as empty strings, not SQL `NULL`, so both conditions are required.
 
-All routes and stops endpoints use a Redis cache-aside pattern. See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
+#### Co-located bus stop merging (`GET /stops`)
+
+Bus stops in GTFS feeds often have no parent station. Opposite-direction platforms at the same intersection are separate stop records with different `stop_id` values, the same `stop_name`, and very similar coordinates. Without merging, a search for "Washington St" would return two near-identical rows — one for each platform.
+
+After the paginated SQL query runs, `mergeColocatedStops()` collapses these in application code using three criteria — all three must hold:
+
+1. **Same `stop_name`**
+2. **Within `~150 m`** (geodesic approximation using degree offsets: `150 / 111_320 °`)
+3. **Share at least one `route_id`** — prevents unrelated stops at wide intersections from being merged
+
+The first stop in each group is kept as the canonical entry. Its `routes` list becomes the union of all merged stops' routes, deduplicated by `routeId` and sorted by `shortName`.
+
+The `getDepartures` endpoint performs a matching neighbor lookup via PostGIS `ST_DWithin` so that clicking a merged stop shows departures from all co-located platforms (both inbound and outbound). See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
 
 ### Ingestion Worker
 

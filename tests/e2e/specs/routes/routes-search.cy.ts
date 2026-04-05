@@ -71,3 +71,57 @@ describe('Routes area journeys', () => {
     cy.contains('Stops').should('be.visible');
   });
 });
+
+describe('Routes — multi-direction branch display', () => {
+  const stop = (stopId: string, stopName: string) => ({
+    stopId,
+    stopName,
+    latitude: 42.35,
+    longitude: -71.06,
+    stopSequence: 1,
+  });
+
+  beforeEach(() => {
+    cy.intercept('GET', '/api/v1/routes**', {
+      statusCode: 200,
+      body: {
+        data: [{ id: 'r1', routeId: '713', shortName: '713', longName: 'Route 713', routeType: 3 }],
+        total: 1,
+      },
+    }).as('routes');
+
+    cy.intercept('GET', '/api/v1/routes/713**', {
+      statusCode: 200,
+      body: {
+        id: 'r1',
+        routeId: '713',
+        shortName: '713',
+        longName: 'Route 713',
+        routeType: 3,
+        branches: [
+          { label: 'Mattapan', directionId: 0, stops: [stop('A', 'Stop A')] },
+          { label: 'Ashmont', directionId: 0, stops: [stop('B', 'Stop B')] },
+          { label: 'Ruggles', directionId: 1, stops: [stop('C', 'Stop C')] },
+        ],
+      },
+    }).as('routeDetail');
+
+    cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } }).as('alerts');
+  });
+
+  it('renders all three branch labels for a tri-destination route', () => {
+    cy.visit('/routes/713');
+    cy.wait(['@routeDetail', '@alerts']);
+    cy.contains('Mattapan').should('be.visible');
+    cy.contains('Ashmont').should('be.visible');
+    cy.contains('Ruggles').should('be.visible');
+  });
+
+  it('renders stops for each branch', () => {
+    cy.visit('/routes/713');
+    cy.wait(['@routeDetail', '@alerts']);
+    cy.contains('Stop A').should('be.visible');
+    cy.contains('Stop B').should('be.visible');
+    cy.contains('Stop C').should('be.visible');
+  });
+});
