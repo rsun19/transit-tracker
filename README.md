@@ -123,6 +123,7 @@ Point your domain's DNS A record to the Hetzner server IP before the first push 
 | [docs/data-model.md](docs/data-model.md)       | PostgreSQL schema, Redis key design, entity relationships     |
 | [docs/configuration.md](docs/configuration.md) | Environment variables, agency config, NGINX/Docker tuning     |
 | [docs/development.md](docs/development.md)     | Local setup, hot-reload workflow, testing, troubleshooting    |
+| [docs/deployment.md](docs/deployment.md)       | CD pipeline, first deploy, TLS bootstrap, troubleshooting     |
 
 ---
 
