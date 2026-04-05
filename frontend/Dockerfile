@@ -12,6 +12,7 @@ RUN npm ci
 
 COPY frontend/src ./src
 COPY frontend/next.config.mjs ./
+COPY frontend/public/ ./public/
 
 ARG BACKEND_URL=http://localhost:3000
 ENV BACKEND_URL=$BACKEND_URL
