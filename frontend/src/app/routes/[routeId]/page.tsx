@@ -75,9 +75,38 @@ export default function RouteDetailPage() {
   }, [routeId]);
 
   const branches = route?.branches ?? [];
-  const hasMultipleBranches = branches.length > 1;
-  // Fallback to the flat stops list for routes with only one branch or legacy responses
-  const singleStops = branches.length === 1 ? branches[0].stops : (route?.stops ?? []);
+
+  // Compute shared trunk stops and per-branch unique tails.
+  //
+  // True branching (e.g. Red Line: two dir=0 branches Ashmont + Braintree):
+  //   → shared trunk shown as a flat list, then one column per branch tail.
+  // Simple inbound/outbound (e.g. Orange, Blue): subway stops have distinct
+  //   stop IDs per platform/direction so intersection is near-empty. Just show
+  //   the outbound (dir=0) branch as a single canonical flat list.
+  let sharedStops: RouteBranch['stops'] = route?.stops ?? [];
+  let branchSections: { label: string; stops: RouteBranch['stops'] }[] = [];
+
+  const canonical = branches.filter((b) => b.directionId === 0);
+
+  if (canonical.length >= 2) {
+    // True branching (e.g. Red Line: Ashmont + Braintree). Use only dir=0 branches
+    // to compute the shared trunk and per-branch unique tails.
+    const stopIdSets = canonical.map((b) => new Set(b.stops.map((s) => s.stopId)));
+    const trunkIds = stopIdSets.reduce((acc, set) => new Set([...acc].filter((id) => set.has(id))));
+    const longestBranch = [...canonical].sort((a, b) => b.stops.length - a.stops.length)[0];
+    sharedStops = longestBranch.stops.filter((s) => trunkIds.has(s.stopId));
+    branchSections = canonical
+      .map((b) => ({ label: b.label, stops: b.stops.filter((s) => !trunkIds.has(s.stopId)) }))
+      .filter((s) => s.stops.length > 0);
+  } else {
+    // Simple inbound/outbound (e.g. Orange, Blue, Silver Line): subway platforms have
+    // different stop IDs per direction so set-intersection produces near-empty trunks.
+    // Just show the outbound (dir=0) branch as a canonical flat list.
+    const representativeBranch =
+      canonical[0] ?? [...branches].sort((a, b) => b.stops.length - a.stops.length)[0];
+    sharedStops = representativeBranch?.stops ?? [];
+    branchSections = [];
+  }
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -125,21 +154,24 @@ export default function RouteDetailPage() {
             Stops
           </Typography>
 
-          {hasMultipleBranches ? (
-            <Grid container spacing={3}>
-              {branches.map((branch) => (
-                <Grid key={branch.label} item xs={12} md={6}>
-                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                    {branch.label}
-                  </Typography>
-                  <StopList stops={branch.stops} routerId={router} />
-                </Grid>
-              ))}
-            </Grid>
-          ) : singleStops.length === 0 ? (
+          {sharedStops.length === 0 && branchSections.length === 0 ? (
             <EmptyState message="No stops found for this route" />
           ) : (
-            <StopList stops={singleStops} routerId={router} />
+            <>
+              {sharedStops.length > 0 && <StopList stops={sharedStops} routerId={router} />}
+              {branchSections.length > 0 && (
+                <Grid container spacing={3} sx={{ mt: sharedStops.length > 0 ? 2 : 0 }}>
+                  {branchSections.map((section) => (
+                    <Grid key={section.label} item xs={12} md={6}>
+                      <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                        {section.label}
+                      </Typography>
+                      <StopList stops={section.stops} routerId={router} />
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </>
           )}
         </>
       )}

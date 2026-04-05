@@ -148,10 +148,41 @@ export default function StopDeparturesPage() {
 
       {!loading && !error && departures.length > 0 && isGrouped && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {directionGroups.map(([dirId, deps]) => {
+          {directionGroups.map(([dirId, deps], idx) => {
             const label =
               dirId !== null ? (DIRECTION_LABELS[dirId] ?? `Direction ${dirId}`) : 'All Departures';
-            return <DepartureTable key={dirId ?? 'all'} title={label} deps={deps} />;
+            const anchor = dirId !== null ? `dir-${dirId}` : 'dir-all';
+            const others = directionGroups
+              .map(([od], oi) => ({ dirId: od, index: oi }))
+              .filter(({ index }) => index !== idx);
+            return (
+              <Box key={dirId ?? 'all'} id={anchor} sx={{ scrollMarginTop: '1rem' }}>
+                {others.map(({ dirId: otherDirId, index: otherIdx }) => {
+                  const otherLabel =
+                    otherDirId !== null
+                      ? (DIRECTION_LABELS[otherDirId] ?? `Direction ${otherDirId}`)
+                      : 'All Departures';
+                  const otherAnchor = otherDirId !== null ? `dir-${otherDirId}` : 'dir-all';
+                  const arrow = otherIdx > idx ? '↓' : '↑';
+                  return (
+                    <Link
+                      key={otherDirId ?? 'all'}
+                      href={`#${otherAnchor}`}
+                      underline="hover"
+                      sx={{
+                        display: 'inline-block',
+                        mb: 1,
+                        fontSize: '0.8rem',
+                        color: 'text.secondary',
+                      }}
+                    >
+                      {arrow} Jump to {otherLabel}
+                    </Link>
+                  );
+                })}
+                <DepartureTable title={label} deps={deps} />
+              </Box>
+            );
           })}
         </Box>
       )}
