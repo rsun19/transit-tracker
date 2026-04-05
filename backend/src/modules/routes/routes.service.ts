@@ -86,7 +86,7 @@ export class RoutesService {
   }
 
   async findOne(routeId: string, agencyKey: string): Promise<RouteResponse> {
-    const cacheKey = `cache:route:v3:${agencyKey}:${routeId}`;
+    const cacheKey = `cache:route:v4:${agencyKey}:${routeId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as RouteResponse;
 
@@ -98,14 +98,14 @@ export class RoutesService {
 
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
 
-    // Find one representative trip per outbound (direction_id = 0) branch, choosing
-    // the trip with the most stops for each unique headsign. This correctly handles
-    // branching routes (e.g. Red Line: Ashmont and Braintree) by picking the longest
-    // full-run trip for each terminal rather than an arbitrary first trip.
-    // direction_id = 0 only — direction 1 is the reverse of each branch.
+    // Find one representative trip per (direction_id, headsign) combination, choosing
+    // the trip with the most stops. This correctly handles branching routes (e.g. Red
+    // Line: Ashmont and Braintree) as well as routes whose inbound/outbound headsigns
+    // differ (e.g. route 713: three distinct destinations across both directions).
     const branchReps = await this.routeRepo.query<
       Array<{
         trip_id: string;
+        direction_id: number;
         shape_id: string | null;
         trip_headsign: string | null;
         stop_count: string;
@@ -117,13 +117,13 @@ export class RoutesService {
          FROM trips t
          JOIN agencies a ON a."agencyId" = t.agency_id
          JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-         WHERE t.route_id = $1 AND a.agency_key = $2 AND t.direction_id = 0
+         WHERE t.route_id = $1 AND a.agency_key = $2
          GROUP BY t.trip_id, t.direction_id, t.trip_headsign, t.shape_id
        )
-       SELECT DISTINCT ON (trip_headsign)
-              trip_id, shape_id, trip_headsign, stop_count
+       SELECT DISTINCT ON (direction_id, trip_headsign)
+              trip_id, direction_id, shape_id, trip_headsign, stop_count
        FROM trip_stop_counts
-       ORDER BY trip_headsign, stop_count DESC`,
+       ORDER BY direction_id, trip_headsign, stop_count DESC`,
       [routeId, agencyKey],
     );
 
@@ -162,7 +162,7 @@ export class RoutesService {
 
     const branches: RouteBranch[] = sortedBranches.map((b) => ({
       label: b.trip_headsign ?? routeId,
-      directionId: 0,
+      directionId: b.direction_id,
       stops: stopsByTripId.get(b.trip_id) ?? [],
     }));
 
