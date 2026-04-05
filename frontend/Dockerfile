@@ -28,7 +28,6 @@ ENV PORT=3001
 COPY --from=builder /app/frontend/.next/standalone ./
 COPY --from=builder /app/frontend/.next/static ./.next/static/
 RUN mkdir -p ./public
-COPY --from=builder /app/frontend/public/ ./public/
 
 EXPOSE 3001
 CMD ["node", "server.js"]
