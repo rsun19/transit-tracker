@@ -43,8 +43,8 @@ describe('Stop departures page', () => {
     });
 
     it('places each departure in the correct table', () => {
-      cy.contains('Outbound').parent().contains('Braintree').should('exist');
-      cy.contains('Inbound').parent().contains('Alewife').should('exist');
+      cy.get('#dir-0').contains('Braintree').should('exist');
+      cy.get('#dir-1').contains('Alewife').should('exist');
     });
   });
 

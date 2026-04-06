@@ -72,7 +72,7 @@ describe('Routes area journeys', () => {
   });
 });
 
-describe('Routes — multi-direction branch display', () => {
+describe('Routes — branching route display (trunk + tails)', () => {
   const stop = (stopId: string, stopName: string) => ({
     stopId,
     stopName,
@@ -81,6 +81,8 @@ describe('Routes — multi-direction branch display', () => {
     stopSequence: 1,
   });
 
+  // Simulates Red Line: two dir=0 branches sharing a trunk, plus a dir=1 inbound branch.
+  // The dir=1 branch should NOT produce its own column — only dir=0 drives the layout.
   beforeEach(() => {
     cy.intercept('GET', '/api/v1/routes**', {
       statusCode: 200,
@@ -99,9 +101,31 @@ describe('Routes — multi-direction branch display', () => {
         longName: 'Route 713',
         routeType: 3,
         branches: [
-          { label: 'Mattapan', directionId: 0, stops: [stop('A', 'Stop A')] },
-          { label: 'Ashmont', directionId: 0, stops: [stop('B', 'Stop B')] },
-          { label: 'Ruggles', directionId: 1, stops: [stop('C', 'Stop C')] },
+          // dir=0: two outbound branches sharing trunk-1 and trunk-2
+          {
+            label: 'Mattapan',
+            directionId: 0,
+            stops: [
+              stop('trunk-1', 'Trunk Stop 1'),
+              stop('trunk-2', 'Trunk Stop 2'),
+              stop('A', 'Mattapan Tail'),
+            ],
+          },
+          {
+            label: 'Ashmont',
+            directionId: 0,
+            stops: [
+              stop('trunk-1', 'Trunk Stop 1'),
+              stop('trunk-2', 'Trunk Stop 2'),
+              stop('B', 'Ashmont Tail'),
+            ],
+          },
+          // dir=1: inbound — should NOT appear as its own column
+          {
+            label: 'Ruggles',
+            directionId: 1,
+            stops: [stop('trunk-1', 'Trunk Stop 1'), stop('C', 'Inbound Only Stop')],
+          },
         ],
       },
     }).as('routeDetail');
@@ -109,19 +133,89 @@ describe('Routes — multi-direction branch display', () => {
     cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } }).as('alerts');
   });
 
-  it('renders all three branch labels for a tri-destination route', () => {
+  it('renders shared trunk stops as a flat list', () => {
+    cy.visit('/routes/713');
+    cy.wait(['@routeDetail', '@alerts']);
+    cy.contains('Trunk Stop 1').should('be.visible');
+    cy.contains('Trunk Stop 2').should('be.visible');
+  });
+
+  it('renders dir=0 branch tail labels and their unique stops', () => {
     cy.visit('/routes/713');
     cy.wait(['@routeDetail', '@alerts']);
     cy.contains('Mattapan').should('be.visible');
     cy.contains('Ashmont').should('be.visible');
-    cy.contains('Ruggles').should('be.visible');
+    cy.contains('Mattapan Tail').should('be.visible');
+    cy.contains('Ashmont Tail').should('be.visible');
   });
 
-  it('renders stops for each branch', () => {
+  it('does not render dir=1 branch as a separate column', () => {
     cy.visit('/routes/713');
     cy.wait(['@routeDetail', '@alerts']);
-    cy.contains('Stop A').should('be.visible');
-    cy.contains('Stop B').should('be.visible');
-    cy.contains('Stop C').should('be.visible');
+    cy.contains('Ruggles').should('not.exist');
+    cy.contains('Inbound Only Stop').should('not.exist');
+  });
+});
+
+describe('Routes — simple inbound/outbound route display', () => {
+  const stop = (stopId: string, stopName: string) => ({
+    stopId,
+    stopName,
+    latitude: 42.35,
+    longitude: -71.06,
+    stopSequence: 1,
+  });
+
+  // Simulates Orange Line: one dir=0 and one dir=1 branch with distinct platform stop IDs.
+  // Should render a single flat list from dir=0 with no branch headers.
+  beforeEach(() => {
+    cy.intercept('GET', '/api/v1/routes/Orange**', {
+      statusCode: 200,
+      body: {
+        id: 'r2',
+        routeId: 'Orange',
+        shortName: 'OL',
+        longName: 'Orange Line',
+        routeType: 1,
+        branches: [
+          {
+            label: 'Forest Hills',
+            directionId: 0,
+            stops: [
+              stop('oak-nb', 'Oak Grove'),
+              stop('mal-nb', 'Malden Center'),
+              stop('fh-nb', 'Forest Hills'),
+            ],
+          },
+          {
+            label: 'Oak Grove',
+            directionId: 1,
+            stops: [
+              stop('fh-sb', 'Forest Hills'),
+              stop('mal-sb', 'Malden Center'),
+              stop('oak-sb', 'Oak Grove'),
+            ],
+          },
+        ],
+      },
+    }).as('routeDetail');
+
+    cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } }).as('alerts');
+  });
+
+  it('renders the outbound stops as a flat list', () => {
+    cy.visit('/routes/Orange');
+    cy.wait(['@routeDetail', '@alerts']);
+    cy.contains('Oak Grove').should('be.visible');
+    cy.contains('Malden Center').should('be.visible');
+    cy.contains('Forest Hills').should('be.visible');
+  });
+
+  it('does not render a branch header for a non-branching route', () => {
+    cy.visit('/routes/Orange');
+    cy.wait(['@routeDetail', '@alerts']);
+    // No subtitle headers should appear — stops render without section labels
+    cy.get('h6').contains('Stops').should('be.visible');
+    cy.contains('Oak Grove').closest('li').should('exist');
   });
 });
