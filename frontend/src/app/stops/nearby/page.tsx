@@ -73,7 +73,9 @@ export default function NearbyStopsPage() {
         setLon(pos.coords.longitude);
       },
       () => {
-        setGeoError('Location access was denied');
+        setGeoError(
+          'Location access is blocked. To see nearby stops, enable location in your browser settings and reload the page',
+        );
         setUseManual(true);
       },
     );

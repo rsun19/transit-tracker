@@ -61,6 +61,13 @@ async function bootstrap() {
   // Restrict CORS to same-origin only
   app.enableCors({ origin: false });
 
+  // Prevent ECONNRESET when a downstream proxy (Next.js, nginx) reuses a
+  // keep-alive connection that the Node.js default 5 s timeout would close.
+  // keepAliveTimeout must be longer than any upstream idle-connection timeout.
+  const httpServer = app.getHttpServer() as import('http').Server;
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
+
   await app.listen(3000);
   Logger.log('Backend API listening on port 3000', 'Bootstrap');
 }

@@ -657,10 +657,25 @@ export class StopsService {
         ? T
         : never;
 
-    const agencyFilter = params.agencyKey ? `AND a.agency_key = $5` : '';
-    const queryParams: unknown[] = [params.lat, params.lon, radius, limit];
-    if (params.agencyKey) queryParams.push(params.agencyKey);
+    // Resolve agency once if agencyKey is provided — avoids a JOIN in the geo
+    // query and gives us the agencyId UUID + timezone needed for the batch departure query.
+    let agencyId: string | undefined;
+    let timezone: string | undefined;
+    if (params.agencyKey) {
+      const [agRow] = await this.dataSource.query<Array<{ agencyId: string; timezone: string }>>(
+        `SELECT "agencyId", timezone FROM agencies WHERE agency_key = $1 LIMIT 1`,
+        [params.agencyKey],
+      );
+      agencyId = agRow?.agencyId;
+      timezone = agRow?.timezone;
+    }
 
+    const agencyFilter = agencyId ? `AND s.agency_id = $5` : '';
+    const queryParams: unknown[] = [params.lat, params.lon, radius, limit];
+    if (agencyId) queryParams.push(agencyId);
+
+    // Step 1: geo query — no correlated routes subquery; routes are batch-fetched
+    // separately (same approach as search()) to avoid one plan-per-stop execution.
     const rows = await this.dataSource.query<
       Array<{
         id: string;
@@ -671,7 +686,7 @@ export class StopsService {
         lat: number;
         lon: number;
         distance_metres: number;
-        routes: StopRouteRef[] | null;
+        agency_id: string;
       }>
     >(
       `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
@@ -681,23 +696,8 @@ export class StopsService {
                 s.location::geography,
                 ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
               ) AS distance_metres,
-              COALESCE(
-                (SELECT json_agg(r)
-                 FROM (
-                   SELECT DISTINCT r2.route_id AS "routeId",
-                                   r2.short_name AS "shortName",
-                                   r2.long_name AS "longName",
-                                   r2.route_type AS "routeType"
-                   FROM stop_times st2
-                   JOIN trips t2 ON t2.trip_id = st2.trip_id AND t2.agency_id = st2.agency_id
-                   JOIN routes r2 ON r2.route_id = t2.route_id AND r2.agency_id = t2.agency_id
-                   WHERE st2.stop_id = s.stop_id AND st2.agency_id = s.agency_id
-                   ORDER BY r2.short_name ASC
-                 ) r),
-                '[]'::json
-              ) AS routes
+              s.agency_id
        FROM stops s
-       JOIN agencies a ON a."agencyId" = s.agency_id
        WHERE ST_DWithin(
            s.location::geography,
            ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
@@ -709,8 +709,66 @@ export class StopsService {
       queryParams,
     );
 
-    const stopsWithDepartures = await Promise.all(
-      rows.map(async (row) => {
+    // Step 2: batch-fetch routes for all returned stop IDs using the same indexed
+    // CTE pattern as search() — one query replaces N correlated subqueries.
+    const routesByStopId = new Map<string, StopRouteRef[]>();
+    if (rows.length > 0) {
+      const stopIdList = rows.map((r) => r.stop_id);
+      const batchAgencyId = agencyId ?? rows[0].agency_id;
+      const routeRows = await this.dataSource.query<
+        Array<{
+          group_stop_id: string;
+          routeId: string;
+          shortName: string | null;
+          longName: string | null;
+          routeType: number;
+        }>
+      >(
+        `WITH expanded_stops AS MATERIALIZED (
+           SELECT stop_id AS query_stop_id, stop_id AS effective_stop_id
+           FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
+           UNION ALL
+           SELECT parent_station_id AS query_stop_id, stop_id AS effective_stop_id
+           FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
+         )
+         SELECT DISTINCT
+                es.query_stop_id  AS group_stop_id,
+                r2.route_id       AS "routeId",
+                r2.short_name     AS "shortName",
+                r2.long_name      AS "longName",
+                r2.route_type     AS "routeType"
+         FROM expanded_stops es
+         JOIN stop_times st2 ON st2.stop_id = es.effective_stop_id AND st2.agency_id = $2
+         JOIN trips t2  ON t2.trip_id  = st2.trip_id  AND t2.agency_id  = st2.agency_id
+         JOIN routes r2 ON r2.route_id = t2.route_id  AND r2.agency_id  = t2.agency_id
+         ORDER BY group_stop_id, r2.short_name ASC`,
+        [stopIdList, batchAgencyId],
+      );
+      for (const row of routeRows) {
+        if (!routesByStopId.has(row.group_stop_id)) routesByStopId.set(row.group_stop_id, []);
+        routesByStopId.get(row.group_stop_id)!.push({
+          routeId: row.routeId,
+          shortName: row.shortName,
+          longName: row.longName,
+          routeType: row.routeType,
+        });
+      }
+    }
+
+    // Step 3: batch-fetch next departure for all stops in one query instead of
+    // N individual getDepartures() calls (which caused ~19 s cold-cache responses).
+    let nextDepartureByStopId = new Map<string, DepartureResponse>();
+    if (agencyId && timezone && rows.length > 0) {
+      nextDepartureByStopId = await this.batchGetNextDepartures(
+        rows.map((r) => r.stop_id),
+        params.agencyKey!,
+        agencyId,
+        timezone,
+      );
+    }
+
+    const data: (StopResponse & { nextDeparture?: DepartureResponse | null })[] = rows.map(
+      (row) => {
         const stop: StopResponse & { nextDeparture?: DepartureResponse | null } = {
           id: row.id,
           stopId: row.stop_id,
@@ -720,30 +778,139 @@ export class StopsService {
           lon: row.lon,
           wheelchairBoarding: row.wheelchair_boarding,
           distanceMetres: Math.round(row.distance_metres),
-          routes: row.routes ?? [],
+          routes: routesByStopId.get(row.stop_id) ?? [],
         };
-
-        // Augment with next departure (US3 AS2)
-        if (params.agencyKey) {
-          try {
-            const deps = await this.getDepartures(row.stop_id, params.agencyKey, 1);
-            stop.nextDeparture = deps.data[0] ?? null;
-          } catch {
-            stop.nextDeparture = null;
-          }
+        if (params.agencyKey !== undefined) {
+          stop.nextDeparture = nextDepartureByStopId.get(row.stop_id) ?? null;
         }
-
         return stop;
-      }),
+      },
     );
 
     const result = {
-      data: stopsWithDepartures,
+      data: mergeColocatedStops(data) as (StopResponse & {
+        nextDeparture?: DepartureResponse | null;
+      })[],
       searchCentre: { lat: params.lat, lon: params.lon },
       radiusMetres: radius,
     };
 
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_NEARBY_TTL_S);
+    return result;
+  }
+
+  /**
+   * Fetch the next scheduled departure for each of the given stop IDs in a single
+   * SQL round-trip. Parent stations are expanded to their child platform stops so
+   * that departures are found even when the stop itself has no stop_times row.
+   * Realtime delays are merged from Redis with a single HMGET call.
+   */
+  private async batchGetNextDepartures(
+    stopIds: string[],
+    agencyKey: string,
+    agencyId: string,
+    timezone: string,
+  ): Promise<Map<string, DepartureResponse>> {
+    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    const todayStr = dateFmt.format(new Date());
+    const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
+
+    const rows = await this.dataSource.query<
+      Array<{
+        stop_id: string;
+        trip_id: string;
+        route_id: string;
+        short_name: string | null;
+        long_name: string | null;
+        trip_headsign: string | null;
+        departure_time: string;
+        direction_id: number | null;
+      }>
+    >(
+      // LATERAL + LIMIT 1 lets PostgreSQL use idx_stop_times_agency_stop_dept for
+      // an ascending index range scan per effective stop, stopping immediately when
+      // the first future-service departure is found. This replaces a MATERIALIZED
+      // stop_slice CTE that cross-joined all stop_times with today_services
+      // (25 k × 43 = 1 M rows) causing ~10 s cold-cache responses.
+      `WITH today_services AS MATERIALIZED (
+         SELECT sc.service_id, sc.agency_id, cand.d
+         FROM service_calendars sc
+         CROSS JOIN (VALUES ($3::date), ($4::date)) AS cand(d)
+         WHERE sc.agency_id = $2
+           AND sc.start_date <= cand.d
+           AND sc.end_date   >= cand.d
+           AND CASE EXTRACT(DOW FROM cand.d)::int
+                 WHEN 0 THEN sc.sunday
+                 WHEN 1 THEN sc.monday
+                 WHEN 2 THEN sc.tuesday
+                 WHEN 3 THEN sc.wednesday
+                 WHEN 4 THEN sc.thursday
+                 WHEN 5 THEN sc.friday
+                 WHEN 6 THEN sc.saturday
+               END = true
+       ),
+       expanded_stops AS MATERIALIZED (
+         SELECT stop_id AS parent_stop_id, stop_id AS effective_stop_id
+         FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
+         UNION ALL
+         SELECT parent_station_id AS parent_stop_id, stop_id AS effective_stop_id
+         FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
+       )
+       SELECT DISTINCT ON (es.parent_stop_id)
+              es.parent_stop_id AS stop_id,
+              dep.trip_id, dep.route_id, dep.short_name, dep.long_name,
+              dep.trip_headsign, dep.direction_id, dep.departure_time
+       FROM expanded_stops es
+       LEFT JOIN LATERAL (
+         SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
+                t.direction_id,
+                ((ts.d + st.departure_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS departure_time,
+                (ts.d + st.departure_time)::timestamp AT TIME ZONE $5 AS eff_ts
+         FROM stop_times st
+         JOIN trips t         ON t.trip_id    = st.trip_id  AND t.agency_id = st.agency_id
+         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
+         JOIN routes r        ON r.route_id   = t.route_id  AND r.agency_id  = t.agency_id
+         WHERE st.stop_id = es.effective_stop_id AND st.agency_id = $2
+           AND (ts.d + st.departure_time)::timestamp AT TIME ZONE $5 >= NOW()
+         ORDER BY eff_ts ASC
+         LIMIT 1
+       ) dep ON true
+       WHERE dep.trip_id IS NOT NULL
+       ORDER BY es.parent_stop_id, dep.eff_ts ASC`,
+      [stopIds, agencyId, todayStr, yesterdayStr, timezone],
+    );
+
+    // Merge realtime delays with one Redis round-trip for all trip IDs.
+    const delayMap = new Map<string, number>();
+    if (rows.length > 0) {
+      try {
+        const redis = this.cacheService.getClient();
+        const tripIds = rows.map((r) => r.trip_id);
+        const delayValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
+        tripIds.forEach((tripId, i) => {
+          const val = delayValues[i];
+          if (val !== null) delayMap.set(tripId, parseInt(val, 10));
+        });
+      } catch {
+        // Redis unavailable — fall back to scheduled-only departures
+      }
+    }
+
+    const result = new Map<string, DepartureResponse>();
+    for (const row of rows) {
+      const delay = delayMap.get(row.trip_id) ?? null;
+      result.set(row.stop_id, {
+        tripId: row.trip_id,
+        routeId: row.route_id,
+        routeShortName: row.short_name,
+        routeLongName: row.long_name,
+        headsign: row.trip_headsign,
+        scheduledDeparture: row.departure_time,
+        realtimeDelaySeconds: delay,
+        hasRealtime: delay !== null,
+        directionId: row.direction_id ?? null,
+      });
+    }
     return result;
   }
 }
