@@ -11,10 +11,15 @@ const BASE_STOP = {
 };
 
 function interceptStops(routes: unknown[]) {
-  cy.intercept('GET', '/api/v1/stops**', {
-    statusCode: 200,
-    body: { data: [{ ...BASE_STOP, routes }], total: 1 },
-  }).as('stops');
+  // Use a regex so this intercept only matches the search endpoint (?q=…)
+  // and not /stops/nearby, which is handled separately.
+  cy.intercept(
+    { method: 'GET', url: /\/api\/v1\/stops\?/ },
+    {
+      statusCode: 200,
+      body: { data: [{ ...BASE_STOP, routes }], total: 1 },
+    },
+  ).as('stops');
 }
 
 describe('Stops area journeys', () => {
@@ -102,20 +107,23 @@ describe('Stops search — co-located stop merging', () => {
   });
 
   it('shows only one result when the API returns already-merged stops', () => {
-    cy.intercept('GET', '/api/v1/stops**', {
-      statusCode: 200,
-      body: {
-        data: [
-          makeStop('stop-merged', [
-            { routeId: '11', shortName: '11', longName: 'Route 11', routeType: 3 },
-            { routeId: '15', shortName: '15', longName: 'Route 15', routeType: 3 },
-            { routeId: 'SL4', shortName: 'SL4', longName: 'Silver Line 4', routeType: 3 },
-            { routeId: 'SL5', shortName: 'SL5', longName: 'Silver Line 5', routeType: 3 },
-          ]),
-        ],
-        total: 1,
+    cy.intercept(
+      { method: 'GET', url: /\/api\/v1\/stops\?/ },
+      {
+        statusCode: 200,
+        body: {
+          data: [
+            makeStop('stop-merged', [
+              { routeId: '11', shortName: '11', longName: 'Route 11', routeType: 3 },
+              { routeId: '15', shortName: '15', longName: 'Route 15', routeType: 3 },
+              { routeId: 'SL4', shortName: 'SL4', longName: 'Silver Line 4', routeType: 3 },
+              { routeId: 'SL5', shortName: 'SL5', longName: 'Silver Line 5', routeType: 3 },
+            ]),
+          ],
+          total: 1,
+        },
       },
-    }).as('stops');
+    ).as('stops');
 
     cy.visit('/stops');
     cy.get('input[placeholder="e.g. Park Street, Silver Line Way"]').type('Washington');
@@ -126,5 +134,32 @@ describe('Stops search — co-located stop merging', () => {
     cy.contains('15').should('be.visible');
     cy.contains('SL4').should('be.visible');
     cy.contains('SL5').should('be.visible');
+  });
+});
+
+describe('Stops search — geolocation denied', () => {
+  // Geolocation is denied globally (see tests/e2e/support/e2e.ts) so no extra
+  // stub is needed here.
+  it('shows "Location access is blocked" empty state when geolocation is denied', () => {
+    cy.visit('/stops');
+    cy.contains('Location access is blocked').should('be.visible');
+    cy.contains('Enable location in your browser settings').should('be.visible');
+  });
+
+  it('still allows text search when geolocation is denied', () => {
+    cy.intercept(
+      { method: 'GET', url: /\/api\/v1\/stops\?/ },
+      {
+        statusCode: 200,
+        body: { data: [BASE_STOP], total: 1 },
+      },
+    ).as('stops');
+
+    cy.visit('/stops');
+    cy.get('input[placeholder="e.g. Park Street, Silver Line Way"]').type('Park');
+    cy.wait('@stops');
+    cy.contains('Park Street').should('be.visible');
+    // The denied empty state should no longer be shown once a search is active.
+    cy.contains('Location access is blocked').should('not.exist');
   });
 });

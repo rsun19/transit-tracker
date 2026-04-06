@@ -13,7 +13,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import Stack from '@mui/material/Stack';
 import Chip from '@mui/material/Chip';
 import SearchIcon from '@mui/icons-material/Search';
-import { fetchStops, type Stop } from '@/lib/api-client';
+import { fetchStops, fetchNearbyStops, type Stop } from '@/lib/api-client';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 
@@ -34,8 +34,33 @@ export default function StopsPage() {
   const [stops, setStops] = useState<Stop[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [geoLoading, setGeoLoading] = useState(true);
+  const [geoDenied, setGeoDenied] = useState(false);
+  const [nearbyStops, setNearbyStops] = useState<Stop[]>([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const debouncedQuery = useDebounce(query, 300);
+
+  // Request geolocation on mount
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGeoLoading(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setGeoLoading(false);
+      },
+      () => {
+        setGeoDenied(true);
+        setGeoLoading(false);
+      },
+    );
+  }, []);
+
+  const isSearching = debouncedQuery.trim().length >= 2;
 
   const search = useCallback(async (q: string) => {
     if (q.trim().length < 2) {
@@ -64,13 +89,27 @@ export default function StopsPage() {
     search(debouncedQuery);
   }, [debouncedQuery, search]);
 
+  // Fetch nearby stops when not searching and coords are available
+  useEffect(() => {
+    if (isSearching || !userCoords) return;
+    setNearbyLoading(true);
+    fetchNearbyStops(userCoords.lat, userCoords.lon, undefined, DEFAULT_AGENCY)
+      .then((res) => setNearbyStops(res.data))
+      .catch(() => setNearbyStops([]))
+      .finally(() => setNearbyLoading(false));
+  }, [isSearching, userCoords]);
+
+  const isNearbyMode = !isSearching && !!userCoords;
+  const activeLoading = isSearching ? loading : isNearbyMode ? nearbyLoading : geoLoading;
+  const activeStops = isSearching ? stops : nearbyStops;
+
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h4" fontWeight={700} gutterBottom>
-        Find a Stop
+        {isNearbyMode ? 'Nearby Stops' : 'Find a Stop'}
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Search by stop name or code
+        {isNearbyMode ? 'Stops closest to your location' : 'Search by stop name or code'}
       </Typography>
 
       <TextField
@@ -89,25 +128,39 @@ export default function StopsPage() {
         aria-label="Stop search"
       />
 
-      {loading && <LoadingSkeleton count={6} />}
+      {activeLoading && <LoadingSkeleton count={6} />}
 
-      {!loading && !searched && query.trim().length < 2 && (
+      {!activeLoading && !isSearching && !isNearbyMode && geoDenied && (
+        <EmptyState
+          message="Location access is blocked"
+          suggestion="Enable location in your browser settings to see nearby stops, or type to search by name."
+        />
+      )}
+
+      {!activeLoading && !isSearching && !isNearbyMode && !geoDenied && (
         <EmptyState
           message="Type to search"
           suggestion="Enter at least 2 characters to find stops"
         />
       )}
 
-      {!loading && searched && stops.length === 0 && (
+      {!activeLoading && isSearching && searched && stops.length === 0 && (
         <EmptyState
           message="No stops found"
           suggestion={`No stops matched "${query}". Try a different name or code.`}
         />
       )}
 
-      {!loading && stops.length > 0 && (
+      {!activeLoading && isNearbyMode && nearbyStops.length === 0 && (
+        <EmptyState
+          message="No nearby stops found"
+          suggestion="Try searching by name or code instead"
+        />
+      )}
+
+      {!activeLoading && activeStops.length > 0 && (
         <List disablePadding>
-          {stops.map((stop) => (
+          {activeStops.map((stop) => (
             <ListItem key={stop.stopId} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
                 onClick={() => router.push(`/stops/${encodeURIComponent(stop.stopId)}`)}
@@ -118,6 +171,13 @@ export default function StopsPage() {
                   secondary={
                     <Stack component="span" direction="column" spacing={0.5}>
                       <span>{stop.stopCode ? `Stop #${stop.stopCode}` : stop.stopId}</span>
+                      {stop.distanceMetres !== undefined && (
+                        <span>
+                          {stop.distanceMetres < 1000
+                            ? `${Math.round(stop.distanceMetres)}m away`
+                            : `${(stop.distanceMetres / 1000).toFixed(1)}km away`}
+                        </span>
+                      )}
                       {stop.routes && stop.routes.length > 0 && (
                         <Stack component="span" direction="row" spacing={0.5} flexWrap="wrap">
                           {Array.from(new Map(stop.routes.map((r) => [r.routeId, r])).values()).map(
