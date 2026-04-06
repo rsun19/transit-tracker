@@ -57,7 +57,7 @@ export class RoutesService {
     const limit = Math.min(params.limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
     const offset = params.offset ?? 0;
 
-    const cacheKey = `cache:routes:${params.agencyKey ?? 'all'}:${params.routeType ?? ''}:${params.q ?? ''}:${limit}:${offset}`;
+    const cacheKey = `cache:routes:v2:${params.agencyKey ?? 'all'}:${params.routeType ?? ''}:${params.q ?? ''}:${limit}:${offset}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as { data: RouteResponse[]; total: number };
 
@@ -70,8 +70,16 @@ export class RoutesService {
       qb.andWhere('(r.short_name ILIKE :q OR r.long_name ILIKE :q)', { q: `%${params.q}%` });
     }
 
+    // Sort by mode priority (subway first, then tram/light-rail, commuter rail, ferry, bus)
+    // so the most-used transit modes always appear at the top of the list regardless of name.
+    // GTFS route_type: 1=Subway 0=Tram 2=Rail 4=Ferry 3=Bus
     const [routes, total] = await qb
-      .orderBy('r.shortName', 'ASC')
+      .addSelect(
+        `CASE r.route_type WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 WHEN 4 THEN 3 ELSE 4 END`,
+        'type_priority',
+      )
+      .orderBy('type_priority', 'ASC')
+      .addOrderBy('r.longName', 'ASC')
       .skip(offset)
       .take(limit)
       .getManyAndCount();

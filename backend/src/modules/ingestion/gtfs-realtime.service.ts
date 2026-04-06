@@ -117,8 +117,13 @@ export class GtfsRealtimeService {
       tripDelays.forEach((delay, tid) => {
         hash[tid] = String(delay);
       });
+      // DEL before HSET — same reason as added_trips: each cycle must be a
+      // clean snapshot so cancelled/ended trips don't keep showing as delayed.
+      pipeline.del(tripUpdateKey);
       pipeline.hset(tripUpdateKey, hash);
       pipeline.expire(tripUpdateKey, TRIP_UPDATE_CACHE_TTL_S);
+    } else {
+      pipeline.del(`trip_updates:${agencyConfig.key}`);
     }
 
     if (addedTrips.size > 0) {
@@ -127,8 +132,15 @@ export class GtfsRealtimeService {
       addedTrips.forEach((trip, tid) => {
         addedHash[tid] = JSON.stringify(trip);
       });
+      // DEL before HSET so stale entries from a previous worker cycle (or a
+      // restart mid-flight) don't accumulate. The hash must be a point-in-time
+      // snapshot of the current feed, not a rolling merge.
+      pipeline.del(addedKey);
       pipeline.hset(addedKey, addedHash);
       pipeline.expire(addedKey, TRIP_UPDATE_CACHE_TTL_S);
+    } else {
+      // No added trips in this feed — clear any leftovers from a previous cycle.
+      pipeline.del(`added_trips:${agencyConfig.key}`);
     }
 
     await pipeline.exec();
