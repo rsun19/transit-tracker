@@ -334,7 +334,7 @@ export class StopsService {
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
   ): Promise<{ data: DepartureResponse[]; stopId: string; agencyKey: string; stopName: string }> {
-    const cacheKey = `cache:departures:v2:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
+    const cacheKey = `cache:departures:v3:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached)
       return JSON.parse(cached) as {
@@ -450,15 +450,24 @@ export class StopsService {
                  WHEN 6 THEN sc.saturday
                END = true
        )
-       SELECT ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-              t.direction_id,
-              ((ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS departure_time
-       FROM stop_slice ss
-       JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
-       JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
-       JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
-       WHERE (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 >= NOW()
-       ORDER BY (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 ASC
+       -- Deduplicate: a trip can appear in stop_slice multiple times when effectiveStopIds
+       -- contains several platforms it serves (e.g. colocated inbound/outbound bus stops).
+       -- The subquery picks the earliest departure for each (trip_id, service_date) pair,
+       -- then the outer query re-sorts and applies the limit.
+       SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, departure_time
+       FROM (
+         SELECT DISTINCT ON (t.trip_id, ts.d)
+                ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
+                t.direction_id,
+                ((ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS departure_time
+         FROM stop_slice ss
+         JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
+         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
+         JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
+         WHERE (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 >= NOW()
+         ORDER BY t.trip_id, ts.d, (ts.d + ss.departure_time)::timestamp AT TIME ZONE $5 ASC
+       ) deduped
+       ORDER BY departure_time ASC
        LIMIT $6`,
       [
         effectiveStopIds,
