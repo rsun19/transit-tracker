@@ -213,7 +213,7 @@ export class GtfsStaticService {
         agencyConfig.displayName,
         agencyConfig.timezone,
         agencyConfig.gtfsStaticUrl,
-        agencyConfig.gtfsRealtimeUrl ?? null,
+        agencyConfig.gtfsRealtimeVehiclePositionsUrl ?? null,
         agencyConfig.apiKeyEnvVar ?? null,
       ],
     );

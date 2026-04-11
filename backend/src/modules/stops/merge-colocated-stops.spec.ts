@@ -1,10 +1,6 @@
 /// <reference types="jest" />
-import {
-  mergeColocatedStops,
-  STOP_MERGE_RADIUS_DEG,
-  type StopResponse,
-  type StopRouteRef,
-} from '@/modules/stops/stops.service';
+import { mergeColocatedStops, STOP_MERGE_RADIUS_DEG } from './mergeColocatedStops';
+import type { StopResponse, StopRouteRef } from './stops.types';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 

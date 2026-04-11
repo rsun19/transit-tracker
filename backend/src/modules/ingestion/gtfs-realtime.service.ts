@@ -10,6 +10,7 @@ import {
   ALERTS_CACHE_TTL_S,
   TRIP_UPDATE_CACHE_TTL_S,
 } from '@/common/constants';
+import { AddedTripStop } from '@/modules/stops/stops.types';
 
 interface VehiclePosition {
   vehicleId: string;
@@ -32,11 +33,6 @@ interface ServiceAlert {
   effect: string;
 }
 
-interface AddedTripStop {
-  stopId: string;
-  departureTime: number; // Unix timestamp (seconds)
-}
-
 interface AddedTripData {
   tripId: string;
   routeId: string;
@@ -56,7 +52,8 @@ export class GtfsRealtimeService {
   ) {}
 
   async pollAgency(agencyConfig: ResolvedAgency): Promise<void> {
-    if (!agencyConfig.gtfsRealtimeUrl && !agencyConfig.gtfsRealtimeTripUpdatesUrl) return;
+    if (!agencyConfig.gtfsRealtimeVehiclePositionsUrl && !agencyConfig.gtfsRealtimeTripUpdatesUrl)
+      return;
 
     const headers: Record<string, string> = {};
     if (agencyConfig.resolvedApiKey) {
@@ -75,8 +72,8 @@ export class GtfsRealtimeService {
     const now = new Date().toISOString();
 
     // Fetch vehicle positions + alerts from the main realtime feed
-    if (agencyConfig.gtfsRealtimeUrl) {
-      const response = await fetch(agencyConfig.gtfsRealtimeUrl, { headers });
+    if (agencyConfig.gtfsRealtimeVehiclePositionsUrl) {
+      const response = await fetch(agencyConfig.gtfsRealtimeVehiclePositionsUrl, { headers });
       if (!response.ok) {
         throw new Error(`GTFS-RT fetch failed for ${agencyConfig.key}: HTTP ${response.status}`);
       }
@@ -86,7 +83,8 @@ export class GtfsRealtimeService {
     }
 
     // Fetch trip updates from the dedicated TripUpdates feed if configured
-    const tripUpdatesUrl = agencyConfig.gtfsRealtimeTripUpdatesUrl ?? agencyConfig.gtfsRealtimeUrl;
+    const tripUpdatesUrl =
+      agencyConfig.gtfsRealtimeTripUpdatesUrl ?? agencyConfig.gtfsRealtimeVehiclePositionsUrl;
     if (tripUpdatesUrl) {
       const response = await fetch(tripUpdatesUrl, { headers });
       if (!response.ok) {
@@ -215,25 +213,25 @@ export class GtfsRealtimeService {
       if (!tripId) continue;
 
       if (validTripIds.has(tripId)) {
-        // Scheduled trip — extract delay from first stop time update
+        // Scheduled trip — extract delay from first stop time update (arrival-based)
         for (const stu of tu.stopTimeUpdate ?? []) {
-          const d = stu.departure?.delay ?? stu.arrival?.delay ?? null;
-          if (d !== null && d !== undefined) {
-            tripDelays.set(tripId, Number(d));
+          const delay = stu.arrival?.delay ?? stu.departure?.delay ?? null;
+          if (delay !== null && delay !== undefined) {
+            tripDelays.set(tripId, Number(delay));
             break;
           }
         }
       } else {
-        // Unscheduled / ADDED trip — collect absolute stop departure timestamps
+        // Unscheduled / ADDED trip — collect absolute stop arrival timestamps
         const routeId = tu.trip?.routeId;
         if (!routeId) continue;
         const stops: AddedTripStop[] = [];
         for (const stu of tu.stopTimeUpdate ?? []) {
           const sid = stu.stopId;
-          const rawTime = stu.departure?.time ?? stu.arrival?.time;
-          const depTime = rawTime != null ? Number(rawTime) : 0;
-          if (sid && depTime > 0) {
-            stops.push({ stopId: sid, departureTime: depTime });
+          const rawTime = stu.arrival?.time ?? stu.departure?.time;
+          const arrivalTime = rawTime != null ? Number(rawTime) : 0;
+          if (sid && arrivalTime > 0) {
+            stops.push({ stopId: sid, arrivalTime });
           }
         }
         if (stops.length > 0) {

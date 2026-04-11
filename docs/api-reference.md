@@ -64,7 +64,8 @@ Returns all configured and ingested agencies.
       "displayName": "MBTA",
       "timezone": "America/New_York",
       "lastIngestedAt": "2026-03-28T06:00:00Z",
-      "hasRealtime": true
+      "hasRealtimePositions": true,
+      "hasRealtimeTripUpdates": true
     }
   ]
 }
@@ -239,19 +240,19 @@ Stops within a radius, sorted by distance. Uses PostGIS KNN (`<->` operator).
 
 ---
 
-### `GET /api/v1/stops/:stopId/departures`
+### `GET /api/v1/stops/:stopId/arrivals`
 
-Upcoming departures for a stop on the current service day, optionally augmented with GTFS-RT delays.
+Upcoming arrivals for a stop on the current service day, optionally augmented with GTFS-RT delays.
 
 **Path parameters**: `stopId` — GTFS `stop_id`
 
 **Query parameters**:
 
-| Param       | Type    | Required | Default | Description                                                   |
-| ----------- | ------- | -------- | ------- | ------------------------------------------------------------- |
-| `agencyKey` | string  | Yes      | —       | Agency owning this stop                                       |
-| `limit`     | integer | No       | `20`    | Max departures (max `100`)                                    |
-| `after`     | string  | No       | now     | ISO 8601 time `HH:MM`; return only departures after this time |
+| Param       | Type    | Required | Default | Description                                                 |
+| ----------- | ------- | -------- | ------- | ----------------------------------------------------------- |
+| `agencyKey` | string  | Yes      | —       | Agency owning this stop                                     |
+| `limit`     | integer | No       | `20`    | Max arrivals (max `100`)                                    |
+| `after`     | string  | No       | now     | ISO 8601 time `HH:MM`; return only arrivals after this time |
 
 **Response 200**:
 
@@ -261,15 +262,15 @@ Upcoming departures for a stop on the current service day, optionally augmented 
   "stopName": "Alewife",
   "agencyKey": "mbta",
   "generatedAt": "2026-03-28T14:32:00Z",
-  "departures": [
+  "arrivals": [
     {
       "tripId": "63885441",
       "routeId": "Red",
       "routeShortName": "Red",
       "headsign": "Ashmont",
-      "scheduledDeparture": "14:35:00",
+      "scheduledArrival": "14:35:00",
       "realtimeDelaySeconds": 120,
-      "realtimeDeparture": "14:37:00",
+      "realtimeArrival": "14:37:00",
       "hasRealtime": true
     }
   ]
@@ -277,7 +278,7 @@ Upcoming departures for a stop on the current service day, optionally augmented 
 ```
 
 **Errors**: `404` if stop not found for the given agency  
-**Cache**: 20 s — key `cache:stop:departures:{agencyKey}:{stopId}:{minuteBucket}`
+**Cache**: 20 s — key `cache:stop:arrivals:{agencyKey}:{stopId}:{minuteBucket}`
 
 ---
 
@@ -332,7 +333,7 @@ Trip detail including the ordered stop sequence.
       "stopName": "Alewife",
       "stopSequence": 1,
       "arrivalTime": "14:35:00",
-      "departureTime": "14:35:00"
+      "arrivalTime": "14:35:00"
     }
   ]
 }

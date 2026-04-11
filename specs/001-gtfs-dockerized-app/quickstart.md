@@ -116,7 +116,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost/api/v1/routes?agencyKey=
     "displayName": "MBTA",
     "timezone": "America/New_York",
     "gtfsStaticUrl": "https://cdn.mbta.com/MBTA_GTFS.zip",
-    "gtfsRealtimeUrl": "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+    "gtfsRealtimeVehiclePositionsUrl": "https://cdn.mbta.com/realtime/VehiclePositions.pb",
     "apiKeyEnvVar": "MBTA_API_KEY"
   },
   {
@@ -124,7 +124,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost/api/v1/routes?agencyKey=
     "displayName": "TriMet",
     "timezone": "America/Los_Angeles",
     "gtfsStaticUrl": "https://developer.trimet.org/schedule/gtfs.zip",
-    "gtfsRealtimeUrl": null,
+    "gtfsRealtimeVehiclePositionsUrl": null,
     "apiKeyEnvVar": null
   }
 ]
@@ -216,10 +216,10 @@ docker compose up --build
 
 ## Troubleshooting
 
-| Symptom                                      | Likely Cause                                    | Fix                                                                   |
-| -------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
-| `transit-backend` exits with `ECONNREFUSED`  | Postgres not ready                              | Wait 30 s; health check retries automatically                         |
-| `transit-worker` logs "feed download failed" | Invalid GTFS URL or missing API key             | Check `.env`; verify URL is reachable from container                  |
-| Frontend shows "No data available yet"       | Ingestion hasn't completed                      | Wait for worker to finish (check `docker compose logs worker`)        |
-| HTTP 429 from API                            | Rate limit hit                                  | Slow down requests; limit is 60/min per IP                            |
-| Map shows no vehicle markers                 | Realtime feed off or agency has no realtime URL | Check `config/agencies.json` for `gtfsRealtimeUrl`; check worker logs |
+| Symptom                                      | Likely Cause                                    | Fix                                                                                   |
+| -------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `transit-backend` exits with `ECONNREFUSED`  | Postgres not ready                              | Wait 30 s; health check retries automatically                                         |
+| `transit-worker` logs "feed download failed" | Invalid GTFS URL or missing API key             | Check `.env`; verify URL is reachable from container                                  |
+| Frontend shows "No data available yet"       | Ingestion hasn't completed                      | Wait for worker to finish (check `docker compose logs worker`)                        |
+| HTTP 429 from API                            | Rate limit hit                                  | Slow down requests; limit is 60/min per IP                                            |
+| Map shows no vehicle markers                 | Realtime feed off or agency has no realtime URL | Check `config/agencies.json` for `gtfsRealtimeVehiclePositionsUrl`; check worker logs |

@@ -53,7 +53,7 @@ Next.js 14 App Router application. All pages are client components that fetch fr
 | `/`                   | Route search (home)                              |
 | `/(routes)/[routeId]` | Route detail — stops list, shape, alerts         |
 | `/stops`              | Stop search                                      |
-| `/stops/[stopId]`     | Stop departures table                            |
+| `/stops/[stopId]`     | Stop arrivals table                              |
 | `/stops/nearby`       | Nearby stops (geolocation or manual coordinates) |
 | `/map`                | Live vehicle map (Leaflet, SSR disabled)         |
 
@@ -67,16 +67,16 @@ Key conventions:
 
 NestJS 10 application. Serves the REST API at `/api/v1`. Modules:
 
-| Module           | Endpoints                                                                               |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `RoutesModule`   | `GET /routes`, `GET /routes/:id`                                                        |
-| `StopsModule`    | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/departures`, `GET /stops/:id/routes` |
-| `TripsModule`    | `GET /trips/:id`                                                                        |
-| `VehiclesModule` | `GET /vehicles/live`                                                                    |
-| `AlertsModule`   | `GET /alerts`                                                                           |
-| `AgenciesModule` | `GET /agencies`                                                                         |
-| `HealthModule`   | `GET /health`                                                                           |
-| `CacheModule`    | Internal Redis wrapper (cache-aside)                                                    |
+| Module           | Endpoints                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| `RoutesModule`   | `GET /routes`, `GET /routes/:id`                                                      |
+| `StopsModule`    | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/arrivals`, `GET /stops/:id/routes` |
+| `TripsModule`    | `GET /trips/:id`                                                                      |
+| `VehiclesModule` | `GET /vehicles/live`                                                                  |
+| `AlertsModule`   | `GET /alerts`                                                                         |
+| `AgenciesModule` | `GET /agencies`                                                                       |
+| `HealthModule`   | `GET /health`                                                                         |
+| `CacheModule`    | Internal Redis wrapper (cache-aside)                                                  |
 
 #### Branching route detection (`GET /routes/:id`)
 
@@ -110,7 +110,7 @@ After the paginated SQL query runs, `mergeColocatedStops()` collapses these in a
 
 The first stop in each group is kept as the canonical entry. Its `routes` list becomes the union of all merged stops' routes, deduplicated by `routeId` and sorted by `shortName`.
 
-The `getDepartures` endpoint performs a matching neighbor lookup via PostGIS `ST_DWithin` so that clicking a merged stop shows departures from all co-located platforms (both inbound and outbound). See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
+The `getArrivals` endpoint performs a matching neighbor lookup via PostGIS `ST_DWithin` so that clicking a merged stop shows arrivals from all co-located platforms (both inbound and outbound). See [data-model.md](data-model.md#redis-cache-keys) for TTL values.
 
 ### Ingestion Worker
 
@@ -127,7 +127,7 @@ Static GTFS data source of truth. Key design decisions:
 
 - All tables have an `agency_id UUID FK` column — row-level agency isolation with no schema duplication
 - `stops.location` is a `GEOMETRY(Point, 4326)` column with a GiST index for PostGIS spatial queries
-- `stop_times.departure_time` is stored as PostgreSQL `INTERVAL` to correctly handle GTFS post-midnight times (e.g. `25:30:00`)
+- `stop_times.departure_time` (GTFS/DB field, not user-facing; all user-facing references use arrivals terminology) is stored as PostgreSQL `INTERVAL` to correctly handle GTFS post-midnight times (e.g. `25:30:00`)
 - Ingestion uses a `SERIALIZABLE` transaction with 1 000-row batched INSERTs for ~500 K stop-time rows
 
 ### Redis (`cache:6379`)
@@ -135,7 +135,7 @@ Static GTFS data source of truth. Key design decisions:
 Two uses:
 
 1. **Realtime data** — `vehicles:{agencyKey}` and `alerts:{agencyKey}` STRING keys, 30 s TTL, written by the worker
-2. **API response cache** — `cache:routes:*`, `cache:stop:departures:*`, `cache:stops:nearby:*` STRING keys, short TTLs (20–300 s)
+2. **API response cache** — `cache:routes:*`, `cache:stop:arrivals:*`, `cache:stops:nearby:*` STRING keys, short TTLs (20–300 s)
 
 When Redis is unreachable, `CacheService` returns `null` (no throw) and logs a `WARN`. The vehicles endpoint returns a `503`; all other endpoints degrade gracefully to live DB queries or empty arrays.
 
@@ -169,7 +169,7 @@ GtfsStaticService.ingest(agency)
 
 ```
 GtfsRealtimeService.poll(agency)
-  1. HTTP GET agency.gtfsRealtimeUrl (with API key header if set)
+  1. HTTP GET agency.gtfsRealtimeVehiclePositionsUrl (with API key header if set)
   2. FeedMessage.decode(buffer)         ← gtfs-realtime-bindings
   3. Build Set<string> of valid trip IDs from DB
   4. Filter VehiclePosition entities → discard unknown trip_ids (WARN)
@@ -177,7 +177,7 @@ GtfsRealtimeService.poll(agency)
        a. trip_id in valid set  → scheduled trip: record delay (first stop_time_update)
                                   stored as  trip_updates:{agencyKey}  HSET tripId → delaySeconds
        b. trip_id not in valid set → ADDED / unscheduled trip: collect absolute
-                                  stop departure timestamps per stop_id
+                                  stop arrival timestamps per stop_id
                                   stored as  added_trips:{agencyKey}   HSET tripId → JSON
   6. Redis pipeline:
        SET  vehicles:{key}     JSON(positions)   EX 30
@@ -187,26 +187,26 @@ GtfsRealtimeService.poll(agency)
   7. EXEC pipeline
 ```
 
-### ADDED Trip Reconciliation (Stop Departures)
+### ADDED Trip Reconciliation (Stop Arrivals)
 
 Many agencies (including MBTA) publish realtime predictions for their scheduled trips
 under opaque `ADDED-xxxx` trip IDs rather than the static GTFS `trip_id`. Naively
 appending ADDED trips as extra rows causes each train to appear twice — once from the
 static schedule and once from the realtime feed.
 
-`StopsService.getDepartures()` reconciles ADDED trips against the scheduled departures
+`StopsService.getArrivals()` reconciles ADDED trips against the scheduled arrivals
 using a nearest-neighbour match:
 
 ```
-For each ADDED trip at this stop (sorted by departure time ascending):
+For each ADDED trip at this stop (sorted by arrival time ascending):
   1. Find the closest unmatched scheduled trip with the same routeId AND directionId
-     whose scheduled departure is within RECONCILE_WINDOW (5 min) of the ADDED time.
+      whose scheduled arrival is within RECONCILE_WINDOW (5 min) of the ADDED time.
   2a. Match found →
         realtimeDelaySeconds = addedTime − scheduledTime   (negative = running early)
         hasRealtime          = true
         Scheduled slot is marked "consumed" (one-to-one mapping)
   2b. No match (genuinely extra service, e.g. shuttle or unplanned trip) →
-        Append as a new departure row with hasRealtime = true
+      Append as a new arrival row with hasRealtime = true
 ```
 
 **Why sort ascending first?** On high-frequency routes (e.g. 2-min headways) processing

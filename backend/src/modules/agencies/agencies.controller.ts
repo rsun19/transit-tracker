@@ -12,7 +12,8 @@ export class AgenciesController {
         key: a.key,
         displayName: a.displayName,
         timezone: a.timezone,
-        hasRealtime: a.hasRealtime,
+        hasRealtimePositions: a.hasRealtimePositions,
+        hasRealtimeTripUpdates: a.hasRealtimeTripUpdates,
         lastIngestedAt: null, // updated by ingestion service
       })),
     };

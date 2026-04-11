@@ -17,6 +17,7 @@ export interface RouteStop {
   latitude: number;
   longitude: number;
   stopSequence: number;
+  scheduledArrival: string;
 }
 
 export interface RouteBranch {
@@ -59,17 +60,17 @@ export interface Stop {
   lon: number;
   wheelchairBoarding: number | null;
   distanceMetres?: number;
-  nextDeparture?: Departure | null;
+  nextArrival?: Arrival | null;
   routes?: StopRouteRef[];
 }
 
-export interface Departure {
+export interface Arrival {
   tripId: string;
   routeId: string;
   routeShortName: string | null;
   routeLongName: string | null;
   headsign: string | null;
-  scheduledDeparture: string;
+  scheduledArrival: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
   directionId: number | null;
@@ -90,7 +91,6 @@ export interface TripStop {
   lat: number;
   lon: number;
   scheduledArrival: string | null;
-  scheduledDeparture: string | null;
 }
 
 export interface Vehicle {
@@ -118,7 +118,8 @@ export interface Agency {
   key: string;
   displayName: string;
   timezone: string;
-  hasRealtime: boolean;
+  hasRealtimePositions: boolean;
+  hasRealtimeTripUpdates: boolean;
   lastIngestedAt: string | null;
 }
 
@@ -158,16 +159,16 @@ export function fetchStops(
   return apiFetch<{ data: Stop[]; total: number }>(`/stops?${qs}`, signal);
 }
 
-export function fetchStopDepartures(
+export function fetchStopArrivals(
   stopId: string,
   agencyKey: string,
   params?: { limit?: number; after?: string },
-): Promise<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }> {
+): Promise<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }> {
   const qs = new URLSearchParams({ agencyKey });
   if (params?.limit !== undefined) qs.set('limit', String(params.limit));
   if (params?.after) qs.set('after', params.after);
-  return apiFetch<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }>(
-    `/stops/${encodeURIComponent(stopId)}/departures?${qs}`,
+  return apiFetch<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }>(
+    `/stops/${encodeURIComponent(stopId)}/arrivals?${qs}`,
   );
 }
 

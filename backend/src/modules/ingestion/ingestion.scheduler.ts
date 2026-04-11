@@ -71,7 +71,9 @@ export class IngestionScheduler implements OnModuleInit {
 
     this.isRealtimePollRunning = true;
     try {
-      const agencies = this.agenciesService.getAllAgencies().filter((a) => a.hasRealtime);
+      const agencies = this.agenciesService
+        .getAllAgencies()
+        .filter((a) => a.hasRealtimePositions || a.hasRealtimeTripUpdates);
 
       for (const agency of agencies) {
         try {
