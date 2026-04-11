@@ -49,8 +49,8 @@ export class StopsController {
     return this.stopsService.search(q, agencyKey, limit, offset);
   }
 
-  @Get(':stopId/departures')
-  async getDepartures(
+  @Get(':stopId/arrivals')
+  async getArrivals(
     @Param('stopId') stopId: string,
     @Query('agencyKey') agencyKey?: string,
     @Query('limit') limitStr?: string,
@@ -58,7 +58,7 @@ export class StopsController {
   ) {
     if (!agencyKey) throw new BadRequestException('agencyKey is required');
     const limit = limitStr ? parseInt(limitStr, 10) : undefined;
-    return this.stopsService.getDepartures(stopId, agencyKey, limit, after);
+    return this.stopsService.getArrivals(stopId, agencyKey, limit, after);
   }
 
   @Get(':stopId/routes')

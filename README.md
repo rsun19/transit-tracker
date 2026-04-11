@@ -2,7 +2,7 @@
 
 A config-driven, multi-agency GTFS transit tracking platform delivered as a single `docker compose up` command.
 
-Ingest GTFS static and realtime feeds from any transit agency, then browse routes, stop departures, nearby stops, and a live vehicle map — all in one web interface.
+Ingest GTFS static and realtime feeds from any transit agency, then browse routes, stop arrivals, nearby stops, and a live vehicle map — all in one web interface.
 
 Built with **Next.js 14**, **NestJS 10**, **PostgreSQL + PostGIS**, **Redis**, and **NGINX**. Adding a new transit agency requires only a single JSON config entry — no code changes.
 
@@ -11,7 +11,8 @@ Built with **Next.js 14**, **NestJS 10**, **PostgreSQL + PostGIS**, **Redis**, a
 ## Features
 
 - **Route search** — full-text search across all routes with route-type filtering
-- **Stop departures** — scheduled departures with realtime delay augmentation from GTFS-RT
+- **Stop arrivals** — scheduled arrivals with realtime delay augmentation from GTFS-RT
+  > **Note:** All user-facing features use arrivals-based terminology. GTFS, database, and API contract fields may retain 'departure' for compatibility and standards compliance.
 - **Nearby stops** — PostGIS KNN query within a configurable radius; geolocation or manual coordinates
 - **Live vehicle map** — Leaflet map with vehicle positions polled every 15 s from GTFS-RT
 - **Service alerts** — GTFS-RT alert banners on all relevant pages

@@ -14,8 +14,8 @@ import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import Paper from '@mui/material/Paper';
-import { fetchStopDepartures, fetchAlerts, type Departure, type Alert } from '@/lib/api-client';
-import { DepartureRow } from '@/components/stops/DepartureRow';
+import { fetchStopArrivals, fetchAlerts, type Arrival, type Alert } from '@/lib/api-client';
+import { ArrivalRow } from '@/components/stops/ArrivalRow';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { AlertBanner } from '@/components/ui/AlertBanner';
@@ -27,25 +27,25 @@ const DIRECTION_LABELS: Record<number, string> = {
   1: 'Inbound',
 };
 
-function DepartureTable({ title, deps }: { title: string; deps: Departure[] }) {
+function ArrivalTable({ title, deps }: { title: string; deps: Arrival[] }) {
   return (
     <Box>
       <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
         {title}
       </Typography>
       <TableContainer component={Paper} variant="outlined">
-        <Table size="small" aria-label={`${title} departure schedule`}>
+        <Table size="small" aria-label={`${title} arrival schedule`}>
           <TableHead>
             <TableRow>
               <TableCell>Route</TableCell>
               <TableCell>Destination</TableCell>
-              <TableCell>Departs</TableCell>
+              <TableCell>Arrives</TableCell>
               <TableCell>Status</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {deps.map((dep, i) => (
-              <DepartureRow key={`${dep.routeId}-${dep.scheduledDeparture}-${i}`} departure={dep} />
+              <ArrivalRow key={`${dep.routeId}-${dep.scheduledArrival}-${i}`} arrival={dep} />
             ))}
           </TableBody>
         </Table>
@@ -54,11 +54,11 @@ function DepartureTable({ title, deps }: { title: string; deps: Departure[] }) {
   );
 }
 
-export default function StopDeparturesPage() {
+export default function StopArrivalsPage() {
   const params = useParams();
   const stopId = decodeURIComponent((params?.stopId as string) ?? '');
 
-  const [departures, setDepartures] = useState<Departure[]>([]);
+  const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [stopName, setStopName] = useState<string>('');
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,26 +68,26 @@ export default function StopDeparturesPage() {
     if (!stopId) return;
     setLoading(true);
     Promise.all([
-      fetchStopDepartures(stopId, DEFAULT_AGENCY),
+      fetchStopArrivals(stopId, DEFAULT_AGENCY),
       fetchAlerts({ stopId, agencyKey: DEFAULT_AGENCY }),
     ])
-      .then(([depData, alertsData]) => {
-        setDepartures(depData.data);
-        setStopName(depData.stopName || stopId);
+      .then(([arrData, alertsData]) => {
+        setArrivals(arrData.data);
+        setStopName(arrData.stopName || stopId);
         setAlerts(alertsData.alerts);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [stopId]);
 
-  // Group departures by directionId. If all share the same direction (or null),
+  // Group arrivals by directionId. If all share the same direction (or null),
   // render a single table; otherwise render one table per direction side-by-side.
   const directionGroups = useMemo(() => {
-    const groups = new Map<number | null, Departure[]>();
-    for (const dep of departures) {
-      const key = dep.directionId;
+    const groups = new Map<number | null, Arrival[]>();
+    for (const arr of arrivals) {
+      const key = arr.directionId;
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(dep);
+      groups.get(key)!.push(arr);
     }
     // Sort groups: 1 (Inbound) before 0 (Outbound) before null
     return [...groups.entries()].sort(([a], [b]) => {
@@ -96,7 +96,7 @@ export default function StopDeparturesPage() {
       if (b === null) return -1;
       return b - a; // 1 before 0
     });
-  }, [departures]);
+  }, [arrivals]);
 
   const isGrouped = directionGroups.length > 1;
 
@@ -115,12 +115,12 @@ export default function StopDeparturesPage() {
         {displayName}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Upcoming departures
+        Upcoming arrivals
       </Typography>
 
       {loading && <LoadingSkeleton count={6} />}
 
-      {!loading && error && <EmptyState message="Could not load departures" suggestion={error} />}
+      {!loading && error && <EmptyState message="Could not load arrivals" suggestion={error} />}
 
       {!loading && !error && alerts.length > 0 && (
         <Box sx={{ mb: 2 }}>
@@ -135,22 +135,22 @@ export default function StopDeparturesPage() {
         </Box>
       )}
 
-      {!loading && !error && departures.length === 0 && (
+      {!loading && !error && arrivals.length === 0 && (
         <EmptyState
-          message="No upcoming departures"
-          suggestion="There are no scheduled departures for this stop right now."
+          message="No upcoming arrivals"
+          suggestion="There are no scheduled arrivals for this stop right now."
         />
       )}
 
-      {!loading && !error && departures.length > 0 && !isGrouped && (
-        <DepartureTable title="All Departures" deps={departures} />
+      {!loading && !error && arrivals.length > 0 && !isGrouped && (
+        <ArrivalTable title="All Arrivals" deps={arrivals} />
       )}
 
-      {!loading && !error && departures.length > 0 && isGrouped && (
+      {!loading && !error && arrivals.length > 0 && isGrouped && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {directionGroups.map(([dirId, deps], idx) => {
             const label =
-              dirId !== null ? (DIRECTION_LABELS[dirId] ?? `Direction ${dirId}`) : 'All Departures';
+              dirId !== null ? (DIRECTION_LABELS[dirId] ?? `Direction ${dirId}`) : 'All Arrivals';
             const anchor = dirId !== null ? `dir-${dirId}` : 'dir-all';
             const others = directionGroups
               .map(([od], oi) => ({ dirId: od, index: oi }))
@@ -161,7 +161,7 @@ export default function StopDeparturesPage() {
                   const otherLabel =
                     otherDirId !== null
                       ? (DIRECTION_LABELS[otherDirId] ?? `Direction ${otherDirId}`)
-                      : 'All Departures';
+                      : 'All Arrivals';
                   const otherAnchor = otherDirId !== null ? `dir-${otherDirId}` : 'dir-all';
                   const arrow = otherIdx > idx ? '↓' : '↑';
                   return (
@@ -180,7 +180,7 @@ export default function StopDeparturesPage() {
                     </Link>
                   );
                 })}
-                <DepartureTable title={label} deps={deps} />
+                <ArrivalTable title={label} deps={deps} />
               </Box>
             );
           })}

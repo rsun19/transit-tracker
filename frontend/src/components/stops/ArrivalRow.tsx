@@ -4,10 +4,10 @@ import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
-import type { Departure } from '@/lib/api-client';
+import type { Arrival } from '@/lib/api-client';
 
-interface DepartureRowProps {
-  departure: Departure;
+interface ArrivalRowProps {
+  arrival: Arrival;
 }
 
 function formatTime(isoString: string): string {
@@ -20,20 +20,19 @@ function formatTime(isoString: string): string {
     return isoString;
   }
 }
-
-export function DepartureRow({ departure }: DepartureRowProps) {
-  const delay = departure.realtimeDelaySeconds;
+export function ArrivalRow({ arrival }: ArrivalRowProps) {
+  const delay = arrival.realtimeDelaySeconds;
   const delayMinutes = delay !== null ? Math.round(delay / 60) : 0;
 
-  const isLate = departure.hasRealtime && delay !== null && delayMinutes > 0;
-  const isEarly = departure.hasRealtime && delay !== null && delayMinutes < 0;
-  const isOnTime = departure.hasRealtime && delay !== null && delayMinutes === 0;
+  const isLate = arrival.hasRealtime && delay !== null && delayMinutes > 0;
+  const isEarly = arrival.hasRealtime && delay !== null && delayMinutes < 0;
+  const isOnTime = arrival.hasRealtime && delay !== null && delayMinutes === 0;
 
-  // Show effective departure time (scheduled + delay) when realtime data is available
+  // Show effective arrival time (scheduled + delay) when realtime data is available
   const effectiveIso =
-    departure.hasRealtime && delay !== null
-      ? new Date(new Date(departure.scheduledDeparture).getTime() + delay * 1000).toISOString()
-      : departure.scheduledDeparture;
+    arrival.hasRealtime && delay !== null
+      ? new Date(new Date(arrival.scheduledArrival).getTime() + delay * 1000).toISOString()
+      : arrival.scheduledArrival;
 
   const timeColor = isLate
     ? 'error.main'
@@ -44,7 +43,7 @@ export function DepartureRow({ departure }: DepartureRowProps) {
         : 'text.primary';
 
   // Prefer short name, fall back to long name (e.g. "Red Line"), then route ID
-  const routeLabel = departure.routeShortName || departure.routeLongName || departure.routeId;
+  const routeLabel = arrival.routeShortName || arrival.routeLongName || arrival.routeId;
 
   return (
     <TableRow hover>
@@ -52,7 +51,7 @@ export function DepartureRow({ departure }: DepartureRowProps) {
         <Chip label={routeLabel} size="small" color="primary" variant="outlined" />
       </TableCell>
       <TableCell>
-        <Typography variant="body2">{departure.headsign ?? '—'}</Typography>
+        <Typography variant="body2">{arrival.headsign ?? '—'}</Typography>
       </TableCell>
       <TableCell>
         <Typography variant="body2" sx={{ color: timeColor }}>
@@ -65,7 +64,7 @@ export function DepartureRow({ departure }: DepartureRowProps) {
           <Chip label={`${Math.abs(delayMinutes)} min early`} size="small" color="warning" />
         )}
         {isOnTime && <Chip label="On Time" size="small" color="success" variant="outlined" />}
-        {!departure.hasRealtime && (
+        {!arrival.hasRealtime && (
           <Typography variant="caption" color="text.secondary">
             (scheduled)
           </Typography>

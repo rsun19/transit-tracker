@@ -2,39 +2,39 @@
 
 const STOP_ID = '70097';
 
-const departure = (overrides: Record<string, unknown> = {}) => ({
+const arrival = (overrides: Record<string, unknown> = {}) => ({
   tripId: 'trip-1',
   routeId: 'Red',
   routeShortName: 'Red',
   routeLongName: 'Red Line',
   headsign: 'Ashmont',
-  scheduledDeparture: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  scheduledArrival: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   realtimeDelaySeconds: null,
   hasRealtime: false,
   directionId: 1,
   ...overrides,
 });
 
-describe('Stop departures page', () => {
+describe('Stop arrivals page', () => {
   describe('two-direction layout', () => {
     beforeEach(() => {
-      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/departures**`, {
+      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/arrivals**`, {
         statusCode: 200,
         body: {
           stopId: STOP_ID,
           stopName: 'Alewife',
           agencyKey: 'mbta',
           data: [
-            departure({ tripId: 'trip-out', directionId: 0, headsign: 'Braintree' }),
-            departure({ tripId: 'trip-in', directionId: 1, headsign: 'Alewife' }),
+            arrival({ tripId: 'trip-out', directionId: 0, headsign: 'Braintree' }),
+            arrival({ tripId: 'trip-in', directionId: 1, headsign: 'Alewife' }),
           ],
         },
-      }).as('departures');
+      }).as('arrivals');
       cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } }).as(
         'alerts',
       );
       cy.visit(`/stops/${STOP_ID}`);
-      cy.wait(['@departures', '@alerts']);
+      cy.wait(['@arrivals', '@alerts']);
     });
 
     it('shows Outbound and Inbound tables stacked vertically', () => {
@@ -42,7 +42,7 @@ describe('Stop departures page', () => {
       cy.contains('Inbound').should('be.visible');
     });
 
-    it('places each departure in the correct table', () => {
+    it('places each arrival in the correct table', () => {
       cy.get('#dir-0').contains('Braintree').should('exist');
       cy.get('#dir-1').contains('Alewife').should('exist');
     });
@@ -50,62 +50,62 @@ describe('Stop departures page', () => {
 
   describe('route chip label', () => {
     it('shows routeLongName for subway routes with empty shortName', () => {
-      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/departures**`, {
+      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/arrivals**`, {
         statusCode: 200,
         body: {
           stopId: STOP_ID,
           stopName: 'Alewife',
           agencyKey: 'mbta',
-          data: [departure({ routeShortName: '', routeLongName: 'Red Line', directionId: 0 })],
+          data: [arrival({ routeShortName: '', routeLongName: 'Red Line', directionId: 0 })],
         },
-      }).as('departures');
+      }).as('arrivals');
       cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } });
       cy.visit(`/stops/${STOP_ID}`);
-      cy.wait('@departures');
+      cy.wait('@arrivals');
       cy.contains('Red Line').should('be.visible');
     });
   });
 
   describe('status chips', () => {
-    function visitWithDep(dep: Record<string, unknown>) {
-      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/departures**`, {
+    function visitWithArr(arr: Record<string, unknown>) {
+      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/arrivals**`, {
         statusCode: 200,
         body: {
           stopId: STOP_ID,
           stopName: 'Alewife',
           agencyKey: 'mbta',
-          data: [departure({ ...dep, directionId: 0 })],
+          data: [arrival({ ...arr, directionId: 0 })],
         },
-      }).as('departures');
+      }).as('arrivals');
       cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } });
       cy.visit(`/stops/${STOP_ID}`);
-      cy.wait('@departures');
+      cy.wait('@arrivals');
     }
 
-    it('shows (scheduled) for departures with no realtime', () => {
-      visitWithDep({ hasRealtime: false, realtimeDelaySeconds: null });
+    it('shows (scheduled) for arrivals with no realtime', () => {
+      visitWithArr({ hasRealtime: false, realtimeDelaySeconds: null });
       cy.contains('(scheduled)').should('be.visible');
     });
 
-    it('shows "On Time" for realtime departure with zero delay', () => {
-      visitWithDep({ hasRealtime: true, realtimeDelaySeconds: 0 });
+    it('shows "On Time" for realtime arrival with zero delay', () => {
+      visitWithArr({ hasRealtime: true, realtimeDelaySeconds: 0 });
       cy.contains('On Time').should('be.visible');
     });
 
-    it('shows "+N min" for a late departure', () => {
-      visitWithDep({ hasRealtime: true, realtimeDelaySeconds: 180 });
+    it('shows "+N min" for a late arrival', () => {
+      visitWithArr({ hasRealtime: true, realtimeDelaySeconds: 180 });
       cy.contains('+3 min').should('be.visible');
     });
 
-    it('shows "N min early" for an early departure', () => {
-      visitWithDep({ hasRealtime: true, realtimeDelaySeconds: -120 });
+    it('shows "N min early" for an early arrival', () => {
+      visitWithArr({ hasRealtime: true, realtimeDelaySeconds: -120 });
       cy.contains('2 min early').should('be.visible');
     });
   });
 
   describe('empty state', () => {
-    it('shows empty state when no departures returned', () => {
-      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/departures**`, {
+    it('shows empty state when no arrivals returned', () => {
+      cy.intercept('GET', `/api/v1/stops/${STOP_ID}/arrivals**`, {
         statusCode: 200,
         body: {
           stopId: STOP_ID,
@@ -116,7 +116,7 @@ describe('Stop departures page', () => {
       });
       cy.intercept('GET', '/api/v1/alerts**', { statusCode: 200, body: { alerts: [] } });
       cy.visit(`/stops/${STOP_ID}`);
-      cy.contains('No upcoming departures').should('be.visible');
+      cy.contains('No upcoming arrivals').should('be.visible');
     });
   });
 });

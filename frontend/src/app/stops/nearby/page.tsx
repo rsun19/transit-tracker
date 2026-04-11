@@ -86,7 +86,7 @@ export default function NearbyStopsPage() {
     if (lat === null || lon === null) return;
     doFetch(lat, lon, radius);
 
-    // Poll every 30s for departure refresh
+    // Poll every 30s for arrival refresh
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(() => doFetch(lat, lon, radius), 30_000);
     return () => {

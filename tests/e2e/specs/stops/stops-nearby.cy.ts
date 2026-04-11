@@ -35,7 +35,7 @@ const nearbyStop = (stopId: string, stopName: string, routes: unknown[]) => ({
   wheelchairBoarding: 1,
   distanceMetres: 50,
   routes,
-  nextDeparture: null,
+  nextArrival: null,
 });
 
 function interceptNearby(stops: unknown[]) {
