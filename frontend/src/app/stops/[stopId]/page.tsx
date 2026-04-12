@@ -1,28 +1,12 @@
-import dynamic from 'next/dynamic';
 import { fetchStopArrivals, fetchAlerts } from '@/lib/api-client';
-import { shouldSkipSSRForCypress } from '@/app/common/ssr-cypress-utils';
+import StopArrivalsClient from './StopArrivalsClient';
 
 const DEFAULT_AGENCY = 'mbta';
-
-const StopArrivalsClient = dynamic(() => import('./StopArrivalsClient'), { ssr: false });
 
 type ServerProps = { params: { stopId: string } };
 
 export default async function StopArrivalsPage({ params }: ServerProps) {
   const stopId = decodeURIComponent(params.stopId);
-
-  // SSR skip logic for Cypress (DRY via utility)
-  if (shouldSkipSSRForCypress()) {
-    // Skip SSR, render client with empty data
-    return (
-      <StopArrivalsClient
-        initialArrivals={[]}
-        initialAlerts={[]}
-        initialStopName={stopId}
-        stopId={stopId}
-      />
-    );
-  }
 
   try {
     const [arrData, alertsData] = await Promise.all([
