@@ -10,21 +10,6 @@ interface ArrivalRowProps {
   arrival: Arrival;
 }
 
-import { useEffect, useState } from 'react';
-
-function useHydratedTime(isoString: string): string {
-  const [localTime, setLocalTime] = useState<string>(isoString);
-  useEffect(() => {
-    try {
-      setLocalTime(
-        new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      );
-    } catch {
-      setLocalTime(isoString);
-    }
-  }, [isoString]);
-  return localTime;
-}
 export function ArrivalRow({ arrival }: ArrivalRowProps) {
   const delay = arrival.realtimeDelaySeconds;
   const delayMinutes = delay !== null ? Math.round(delay / 60) : 0;
@@ -47,7 +32,6 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
   // Prefer short name, fall back to long name (e.g. "Red Line"), then route ID
   const routeLabel = arrival.routeShortName || arrival.routeLongName || arrival.routeId;
 
-  const hydratedTime = useHydratedTime(effectiveIso);
   return (
     <TableRow hover>
       <TableCell>
@@ -58,7 +42,7 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
       </TableCell>
       <TableCell>
         <Typography variant="body2" sx={{ color: timeColor }}>
-          {hydratedTime}
+          {effectiveIso}
         </Typography>
       </TableCell>
       <TableCell>
