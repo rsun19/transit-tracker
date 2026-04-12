@@ -62,7 +62,7 @@ The agency config file is a JSON array. Each element configures one transit prov
     "displayName": "MBTA",
     "timezone": "America/New_York",
     "gtfsStaticUrl": "https://cdn.mbta.com/MBTA_GTFS.zip",
-    "gtfsRealtimeUrl": "https://api-v3.mbta.com/gtfs_rt/VehiclePositions.pb",
+    "gtfsRealtimeVehiclePositionsUrl": "https://api-v3.mbta.com/gtfs_rt/VehiclePositions.pb",
     "apiKeyEnvVar": "MBTA_API_KEY"
   }
 ]
@@ -70,14 +70,14 @@ The agency config file is a JSON array. Each element configures one transit prov
 
 ### Field Reference
 
-| Field             | Type             | Required | Description                                                                                                                                   |
-| ----------------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`             | `string`         | Yes      | URL-safe slug used in API paths and Redis keys (e.g. `mbta`). Must be unique across all agencies.                                             |
-| `displayName`     | `string`         | Yes      | Human-readable agency name displayed in the frontend.                                                                                         |
-| `timezone`        | `string`         | Yes      | IANA timezone string (e.g. `America/New_York`). Used for service-day calculations and display.                                                |
-| `gtfsStaticUrl`   | `string`         | Yes      | URL of the agency's GTFS static ZIP archive. Downloaded on each ingestion cycle.                                                              |
-| `gtfsRealtimeUrl` | `string \| null` | No       | URL of the agency's GTFS-Realtime Protobuf feed. Agencies without realtime data may omit this field or set it to `null`.                      |
-| `apiKeyEnvVar`    | `string \| null` | No       | Name of the environment variable that holds the API key for this agency's feed URLs. The worker reads `process.env[apiKeyEnvVar]` at runtime. |
+| Field                             | Type             | Required | Description                                                                                                                                   |
+| --------------------------------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`                             | `string`         | Yes      | URL-safe slug used in API paths and Redis keys (e.g. `mbta`). Must be unique across all agencies.                                             |
+| `displayName`                     | `string`         | Yes      | Human-readable agency name displayed in the frontend.                                                                                         |
+| `timezone`                        | `string`         | Yes      | IANA timezone string (e.g. `America/New_York`). Used for service-day calculations and display.                                                |
+| `gtfsStaticUrl`                   | `string`         | Yes      | URL of the agency's GTFS static ZIP archive. Downloaded on each ingestion cycle.                                                              |
+| `gtfsRealtimeVehiclePositionsUrl` | `string \| null` | No       | URL of the GTFS-Realtime VehiclePositions Protobuf feed. Agencies without realtime data may omit this field or set it to `null`.              |
+| `apiKeyEnvVar`                    | `string \| null` | No       | Name of the environment variable that holds the API key for this agency's feed URLs. The worker reads `process.env[apiKeyEnvVar]` at runtime. |
 
 ### Adding an Agency
 
@@ -99,18 +99,18 @@ The agency config file is a JSON array. Each element configures one transit prov
 
 These values are compiled into the backend. To change them, edit `backend/src/common/constants.ts` and rebuild.
 
-| Constant                     | Value   | Description                                                                                         |
-| ---------------------------- | ------- | --------------------------------------------------------------------------------------------------- |
-| `VEHICLE_CACHE_TTL_S`        | `30`    | TTL (seconds) for `vehicles:{agencyKey}` Redis keys. Vehicles older than this are considered stale. |
-| `ALERTS_CACHE_TTL_S`         | `30`    | TTL (seconds) for `alerts:{agencyKey}` Redis keys.                                                  |
-| `API_CACHE_DEPARTURES_TTL_S` | `20`    | TTL for departure time API responses.                                                               |
-| `API_CACHE_NEARBY_TTL_S`     | `45`    | TTL for nearby-stops spatial query results.                                                         |
-| `API_CACHE_ROUTES_TTL_S`     | `300`   | TTL for route list and individual route responses.                                                  |
-| `REALTIME_POLL_INTERVAL_MS`  | `15000` | Interval between GTFS-Realtime feed polls (milliseconds).                                           |
-| `DEFAULT_SEARCH_LIMIT`       | `20`    | Default page size for list endpoints that support `limit`.                                          |
-| `MAX_SEARCH_LIMIT`           | `100`   | Maximum allowed value for `limit` query parameter.                                                  |
-| `NEARBY_DEFAULT_RADIUS_M`    | `500`   | Default search radius (metres) for `/stops/nearby`.                                                 |
-| `NEARBY_MAX_RADIUS_M`        | `5000`  | Maximum allowed radius for `/stops/nearby`.                                                         |
+| Constant                    | Value   | Description                                                                                         |
+| --------------------------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `VEHICLE_CACHE_TTL_S`       | `30`    | TTL (seconds) for `vehicles:{agencyKey}` Redis keys. Vehicles older than this are considered stale. |
+| `ALERTS_CACHE_TTL_S`        | `30`    | TTL (seconds) for `alerts:{agencyKey}` Redis keys.                                                  |
+| `API_CACHE_ARRIVALS_TTL_S`  | `20`    | TTL for arrival time API responses.                                                                 |
+| `API_CACHE_NEARBY_TTL_S`    | `45`    | TTL for nearby-stops spatial query results.                                                         |
+| `API_CACHE_ROUTES_TTL_S`    | `300`   | TTL for route list and individual route responses.                                                  |
+| `REALTIME_POLL_INTERVAL_MS` | `15000` | Interval between GTFS-Realtime feed polls (milliseconds).                                           |
+| `DEFAULT_SEARCH_LIMIT`      | `20`    | Default page size for list endpoints that support `limit`.                                          |
+| `MAX_SEARCH_LIMIT`          | `100`   | Maximum allowed value for `limit` query parameter.                                                  |
+| `NEARBY_DEFAULT_RADIUS_M`   | `500`   | Default search radius (metres) for `/stops/nearby`.                                                 |
+| `NEARBY_MAX_RADIUS_M`       | `5000`  | Maximum allowed radius for `/stops/nearby`.                                                         |
 
 ---
 

@@ -219,7 +219,7 @@ Record command output snippets and blockers in `specs/002-test-automation-ci/res
      "displayName": "TriMet",
      "timezone": "America/Los_Angeles",
      "gtfsStaticUrl": "https://developer.trimet.org/schedule/gtfs.zip",
-     "gtfsRealtimeUrl": null,
+     "gtfsRealtimeVehiclePositionsUrl": null,
      "apiKeyEnvVar": null
    }
    ```
@@ -274,7 +274,7 @@ transit-tracker/
 │   └── src/
 │       ├── agencies/   Agency REST module
 │       ├── routes/     Routes REST module
-│       ├── stops/      Stops + nearby + departures modules
+│       ├── stops/      Stops + nearby + arrivals modules
 │       ├── trips/      Trips REST module
 │       ├── vehicles/   Live vehicles module
 │       ├── alerts/     Service alerts module
@@ -302,7 +302,7 @@ transit-tracker/
 | Worker logs "feed download failed"               | Invalid URL or missing API key            | Check `.env`; verify the URL is reachable from inside the container (`docker compose exec worker curl <url>`)                  |
 | Frontend shows "No data available yet"           | Ingestion hasn't finished                 | Check `docker compose logs worker` and wait for the ingest to complete                                                         |
 | HTTP 429 from `/api/`                            | Rate limit hit                            | Slow down requests; limit is 1 req/s sustained, burst 10 per IP                                                                |
-| Map shows no vehicle markers                     | Realtime feed disabled or unreachable     | Check `gtfsRealtimeUrl` in `config/agencies.json`; check worker logs                                                           |
+| Map shows no vehicle markers                     | Realtime feed disabled or unreachable     | Check `gtfsRealtimeVehiclePositionsUrl` in `config/agencies.json`; check worker logs                                           |
 | `docker compose up` fails on `permission denied` | Docker socket not accessible              | Ensure Docker Desktop is running and your user is in the `docker` group                                                        |
 | Stop search returns empty (`data: []`)           | `parent_station_id` stored as `''`        | Query must use `IS NULL OR = ''`; a plain `IS NULL` misses blank CSV fields ingested as empty strings                          |
 | Route detail only shows one branch               | Arbitrary trip selected by `trip_id` sort | `findOne()` must use `DISTINCT ON (trip_headsign) ORDER BY trip_headsign, stop_count DESC` to pick the longest trip per branch |

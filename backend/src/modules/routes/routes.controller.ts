@@ -26,4 +26,12 @@ export class RoutesController {
     }
     return this.routesService.findOne(routeId, agencyKey);
   }
+
+  @Get(':routeId/shape')
+  async getShape(@Param('routeId') routeId: string, @Query('agencyKey') agencyKey?: string) {
+    if (!agencyKey) {
+      throw new NotFoundException('agencyKey query param is required');
+    }
+    return this.routesService.getShape(routeId, agencyKey);
+  }
 }

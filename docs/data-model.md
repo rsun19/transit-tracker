@@ -84,21 +84,23 @@ One row per configured transit provider.
 
 Associates stops with trips in sequence order. This is the largest table — MBTA has ~500 K rows.
 
-| Column           | Type           | Constraints                                               |
-| ---------------- | -------------- | --------------------------------------------------------- |
-| `id`             | `UUID`         | `PRIMARY KEY`                                             |
-| `agency_id`      | `UUID`         | `NOT NULL` — denormalized for efficient per-agency DELETE |
-| `trip_id`        | `VARCHAR(100)` | `NOT NULL`                                                |
-| `stop_id`        | `VARCHAR(100)` | `NOT NULL`                                                |
-| `stop_sequence`  | `INTEGER`      | `NOT NULL`                                                |
-| `arrival_time`   | `INTERVAL`     | nullable                                                  |
-| `departure_time` | `INTERVAL`     | `NOT NULL`                                                |
-| `pickup_type`    | `SMALLINT`     | `DEFAULT 0`                                               |
-| `drop_off_type`  | `SMALLINT`     | `DEFAULT 0`                                               |
+| Column           | Type           | Constraints                                                                                                                   |
+| ---------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `id`             | `UUID`         | `PRIMARY KEY`                                                                                                                 |
+| `agency_id`      | `UUID`         | `NOT NULL` — denormalized for efficient per-agency DELETE                                                                     |
+| `trip_id`        | `VARCHAR(100)` | `NOT NULL`                                                                                                                    |
+| `stop_id`        | `VARCHAR(100)` | `NOT NULL`                                                                                                                    |
+| `stop_sequence`  | `INTEGER`      | `NOT NULL`                                                                                                                    |
+| `arrival_time`   | `INTERVAL`     | nullable                                                                                                                      |
+| `departure_time` | `INTERVAL`     | `NOT NULL` (GTFS/DB field; not user-facing; all user-facing references use arrivals terminology; see also arrival_time below) |
+| `pickup_type`    | `SMALLINT`     | `DEFAULT 0`                                                                                                                   |
+| `drop_off_type`  | `SMALLINT`     | `DEFAULT 0`                                                                                                                   |
 
-**Indexes**: `INDEX (agency_id, trip_id, stop_sequence)` · `INDEX (agency_id, stop_id, departure_time)`
+**Indexes**: `INDEX (agency_id, trip_id, stop_sequence)` · `INDEX (agency_id, stop_id, arrival_time)`
 
 > **Why `INTERVAL` for times?** GTFS allows departure times past midnight (e.g. `25:30:00` for a trip at 1:30 AM the next service day). PostgreSQL `TIME` rejects these values. `INTERVAL` stores them as seconds past midnight and compares correctly across the service day boundary.
+>
+> **Note:** `departure_time` is a GTFS/DB field and not part of the user-facing arrivals model. All user-facing references use arrivals terminology for clarity and consistency.
 
 ### `shapes`
 
@@ -161,12 +163,12 @@ Both keys are written atomically via a Redis pipeline on each realtime poll cycl
 
 ### API response cache keys (written by API server)
 
-| Key pattern                                           | TTL   | Invalidation                                          |
-| ----------------------------------------------------- | ----- | ----------------------------------------------------- |
-| `cache:routes:{agencyKey}`                            | 300 s | Expires naturally; refreshed after GTFS static ingest |
-| `cache:route:v2:{agencyKey}:{routeId}`                | 300 s | —                                                     |
-| `cache:stop:departures:{agencyKey}:{stopId}:{bucket}` | 20 s  | —                                                     |
-| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`       | 45 s  | —                                                     |
+| Key pattern                                         | TTL   | Invalidation                                          |
+| --------------------------------------------------- | ----- | ----------------------------------------------------- |
+| `cache:routes:{agencyKey}`                          | 300 s | Expires naturally; refreshed after GTFS static ingest |
+| `cache:route:v2:{agencyKey}:{routeId}`              | 300 s | —                                                     |
+| `cache:stop:arrivals:{agencyKey}:{stopId}:{bucket}` | 20 s  | —                                                     |
+| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`     | 45 s  | —                                                     |
 
 `{lat3dp}` and `{lon3dp}` are latitude/longitude rounded to 3 decimal places (~100 m precision) to improve cache hit rate for nearby-stop queries from slightly different coordinates.
 

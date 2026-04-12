@@ -1,22 +1,20 @@
-import {
-  reconcileAddedTrips,
-  RECONCILE_WINDOW_MS,
-  type DepartureResponse,
-  type AddedTripEntry,
-} from '@/modules/stops/stops.service';
+import { reconcileAddedTrips } from './reconcileAddedTrips';
+// Define locally for test (5 min)
+const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
+import type { ArrivalResponse, AddedTripEntry } from './stops.types';
 
 // Helpers ────────────────────────────────────────────────────────────────────
 
 const T0 = new Date('2026-04-03T13:00:00Z').getTime(); // reference epoch ms
 
-function sched(overrides: Partial<DepartureResponse> = {}): DepartureResponse {
+function sched(overrides: Partial<ArrivalResponse> = {}): ArrivalResponse {
   return {
     tripId: 'trip-1',
     routeId: 'Red',
     routeShortName: 'RL',
     routeLongName: 'Red Line',
     headsign: 'Alewife',
-    scheduledDeparture: new Date(T0).toISOString(),
+    realtimeArrival: new Date(T0).toISOString(),
     realtimeDelaySeconds: null,
     hasRealtime: false,
     directionId: 1,
@@ -32,7 +30,7 @@ function added(overrides: Partial<AddedTripEntry> = {}): AddedTripEntry {
       directionId: 1,
       headsign: null,
     },
-    departureTime: T0 / 1000, // same as scheduled by default
+    arrivalTime: T0 / 1000, // same as scheduled by default
     routeShortName: 'RL',
     routeLongName: 'Red Line',
     headsignFallback: 'Alewife',
@@ -45,8 +43,8 @@ function added(overrides: Partial<AddedTripEntry> = {}): AddedTripEntry {
 describe('reconcileAddedTrips()', () => {
   describe('basic reconciliation', () => {
     it('merges ADDED trip into nearest scheduled slot and sets hasRealtime=true', () => {
-      const deps = [sched({ scheduledDeparture: new Date(T0).toISOString() })];
-      const entries = [added({ departureTime: T0 / 1000 + 30 })]; // 30 s late
+      const deps = [sched({ realtimeArrival: new Date(T0).toISOString() })];
+      const entries = [added({ arrivalTime: T0 / 1000 + 30 })]; // 30 s late
       reconcileAddedTrips(deps, entries);
 
       expect(deps[0].hasRealtime).toBe(true);
@@ -54,8 +52,8 @@ describe('reconcileAddedTrips()', () => {
     });
 
     it('computes negative delay when ADDED trip arrives early', () => {
-      const deps = [sched({ scheduledDeparture: new Date(T0).toISOString() })];
-      const entries = [added({ departureTime: T0 / 1000 - 90 })]; // 90 s early
+      const deps = [sched({ realtimeArrival: new Date(T0).toISOString() })];
+      const entries = [added({ arrivalTime: T0 / 1000 - 90 })]; // 90 s early
       reconcileAddedTrips(deps, entries);
 
       expect(deps[0].realtimeDelaySeconds).toBe(-90);
@@ -63,7 +61,7 @@ describe('reconcileAddedTrips()', () => {
 
     it('does not append a new row when a match is found', () => {
       const deps = [sched()];
-      const entries = [added({ departureTime: T0 / 1000 + 60 })];
+      const entries = [added({ arrivalTime: T0 / 1000 + 60 })];
       reconcileAddedTrips(deps, entries);
 
       expect(deps).toHaveLength(1);
@@ -73,7 +71,7 @@ describe('reconcileAddedTrips()', () => {
   describe('window boundary', () => {
     it('matches ADDED trip exactly at the window boundary (5 min)', () => {
       const deps = [sched()];
-      const entries = [added({ departureTime: T0 / 1000 + RECONCILE_WINDOW_MS / 1000 })];
+      const entries = [added({ arrivalTime: T0 / 1000 + RECONCILE_WINDOW_MS / 1000 })];
       reconcileAddedTrips(deps, entries);
 
       expect(deps[0].hasRealtime).toBe(true);
@@ -81,7 +79,7 @@ describe('reconcileAddedTrips()', () => {
 
     it('appends ADDED trip as new row when beyond the window', () => {
       const deps = [sched()];
-      const entries = [added({ departureTime: T0 / 1000 + RECONCILE_WINDOW_MS / 1000 + 1 })];
+      const entries = [added({ arrivalTime: T0 / 1000 + RECONCILE_WINDOW_MS / 1000 + 1 })];
       reconcileAddedTrips(deps, entries);
 
       expect(deps).toHaveLength(2);
@@ -112,10 +110,10 @@ describe('reconcileAddedTrips()', () => {
 
   describe('one-to-one mapping', () => {
     it('each scheduled slot is consumed by at most one ADDED trip', () => {
-      const deps = [sched({ tripId: 'trip-1', scheduledDeparture: new Date(T0).toISOString() })];
+      const deps = [sched({ tripId: 'trip-1', realtimeArrival: new Date(T0).toISOString() })];
       const entries = [
-        added({ trip: { ...added().trip, tripId: 'ADDED-A' }, departureTime: T0 / 1000 + 20 }),
-        added({ trip: { ...added().trip, tripId: 'ADDED-B' }, departureTime: T0 / 1000 + 40 }),
+        added({ trip: { ...added().trip, tripId: 'ADDED-A' }, arrivalTime: T0 / 1000 + 20 }),
+        added({ trip: { ...added().trip, tripId: 'ADDED-B' }, arrivalTime: T0 / 1000 + 40 }),
       ];
       reconcileAddedTrips(deps, entries);
 
@@ -129,9 +127,9 @@ describe('reconcileAddedTrips()', () => {
     it('assigns each ADDED trip to its nearest earlier slot on 2-min headways', () => {
       // Scheduled: 13:00, 13:02, 13:04
       const deps = [
-        sched({ tripId: 'trip-A', scheduledDeparture: new Date(T0).toISOString() }),
-        sched({ tripId: 'trip-B', scheduledDeparture: new Date(T0 + 2 * 60000).toISOString() }),
-        sched({ tripId: 'trip-C', scheduledDeparture: new Date(T0 + 4 * 60000).toISOString() }),
+        sched({ tripId: 'trip-A', realtimeArrival: new Date(T0).toISOString() }),
+        sched({ tripId: 'trip-B', realtimeArrival: new Date(T0 + 2 * 60000).toISOString() }),
+        sched({ tripId: 'trip-C', realtimeArrival: new Date(T0 + 4 * 60000).toISOString() }),
       ];
       // ADDED (passed in reversed order to verify sort):
       //   ADDED-X ≈ 13:04:15 → should match trip-C
@@ -139,11 +137,11 @@ describe('reconcileAddedTrips()', () => {
       const entries = [
         added({
           trip: { ...added().trip, tripId: 'ADDED-X' },
-          departureTime: T0 / 1000 + 4 * 60 + 15,
+          arrivalTime: T0 / 1000 + 4 * 60 + 15,
         }),
         added({
           trip: { ...added().trip, tripId: 'ADDED-Y' },
-          departureTime: T0 / 1000 + 2 * 60 + 20,
+          arrivalTime: T0 / 1000 + 2 * 60 + 20,
         }),
       ];
       reconcileAddedTrips(deps, entries);
@@ -185,7 +183,7 @@ describe('reconcileAddedTrips()', () => {
     });
 
     it('uses headsignFallback on appended new-service rows', () => {
-      const deps: DepartureResponse[] = [];
+      const deps: ArrivalResponse[] = [];
       const entries = [added({ headsignFallback: 'Alewife' })];
       reconcileAddedTrips(deps, entries);
 
@@ -194,18 +192,18 @@ describe('reconcileAddedTrips()', () => {
   });
 
   describe('edge cases', () => {
-    it('returns departures unchanged when addedEntries is empty', () => {
+    it('returns arrivals unchanged when addedEntries is empty', () => {
       const deps = [sched()];
       reconcileAddedTrips(deps, []);
       expect(deps).toHaveLength(1);
       expect(deps[0].hasRealtime).toBe(false);
     });
 
-    it('appends all entries as new rows when departures is empty', () => {
-      const deps: DepartureResponse[] = [];
+    it('appends all entries as new rows when arrivals is empty', () => {
+      const deps: ArrivalResponse[] = [];
       reconcileAddedTrips(deps, [
         added(),
-        added({ trip: { ...added().trip, tripId: 'ADDED-002' }, departureTime: T0 / 1000 + 120 }),
+        added({ trip: { ...added().trip, tripId: 'ADDED-002' }, arrivalTime: T0 / 1000 + 120 }),
       ]);
       expect(deps).toHaveLength(2);
       expect(deps.every((d) => d.hasRealtime)).toBe(true);
@@ -214,8 +212,8 @@ describe('reconcileAddedTrips()', () => {
     it('does not mutate the original addedEntries array order', () => {
       const deps = [sched()];
       const entries = [
-        added({ trip: { ...added().trip, tripId: 'ADDED-Z' }, departureTime: T0 / 1000 + 200 }),
-        added({ trip: { ...added().trip, tripId: 'ADDED-A' }, departureTime: T0 / 1000 + 10 }),
+        added({ trip: { ...added().trip, tripId: 'ADDED-Z' }, arrivalTime: T0 / 1000 + 200 }),
+        added({ trip: { ...added().trip, tripId: 'ADDED-A' }, arrivalTime: T0 / 1000 + 10 }),
       ];
       const originalOrder = entries.map((e) => e.trip.tripId);
       reconcileAddedTrips(deps, entries);

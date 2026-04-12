@@ -11,7 +11,7 @@ export interface TripStopResponse {
   stopCode: string | null;
   lat: number;
   lon: number;
-  scheduledArrival: string | null;
+  realtimeArrival: string | null;
   scheduledDeparture: string | null;
 }
 
@@ -80,7 +80,8 @@ export class TripsService {
         stopCode: row.stop_code,
         lat: row.lat,
         lon: row.lon,
-        scheduledArrival: row.arrival_time,
+        scheduledArrival: row.arrival_time, // preserve contract
+        realtimeArrival: row.arrival_time,
         scheduledDeparture: row.departure_time,
       })),
     };

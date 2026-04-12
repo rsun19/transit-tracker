@@ -16,7 +16,7 @@ describe('Accessibility CI gate aggregation', () => {
   it('has no violations for empty state content and action', async () => {
     const { container } = render(
       <EmptyState
-        message="No departures yet"
+        message="No arrivals yet"
         suggestion="Try widening the time range"
         actionLabel="Refresh"
         onAction={() => undefined}

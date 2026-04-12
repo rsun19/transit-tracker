@@ -19,7 +19,7 @@ export class Agency {
   gtfsStaticUrl!: string;
 
   @Column({ name: 'gtfs_realtime_url', type: 'text', nullable: true })
-  gtfsRealtimeUrl!: string | null;
+  gtfsRealtimeVehiclePositionsUrl!: string | null;
 
   @Column({ name: 'api_key_env_var', type: 'varchar', length: 128, nullable: true })
   apiKeyEnvVar!: string | null;

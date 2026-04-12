@@ -26,7 +26,7 @@ export class AlertsController {
   ) {
     const agencies = agencyKey
       ? [this.agenciesService.getAgencyByKey(agencyKey)].filter(Boolean)
-      : this.agenciesService.getAllAgencies().filter((a) => a.hasRealtime);
+      : this.agenciesService.getAllAgencies().filter((a) => a.hasRealtimePositions);
 
     const allAlerts: Alert[] = [];
 

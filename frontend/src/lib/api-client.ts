@@ -1,7 +1,21 @@
 const API_BASE = '/api/v1';
 
+// Get BACKEND_URL from env for SSR
+function getApiBaseUrl() {
+  // On the server, use process.env.BACKEND_URL
+  if (typeof window === 'undefined') {
+    // Next.js exposes env vars prefixed with NEXT_PUBLIC_ to the browser, but for SSR we use process.env
+    return process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api/v1` : API_BASE;
+  }
+  // On the client, use relative path
+  return API_BASE;
+}
+
 async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { signal });
+  const baseUrl = getApiBaseUrl();
+  const url =
+    baseUrl.endsWith('/') && path.startsWith('/') ? baseUrl.slice(0, -1) + path : baseUrl + path;
+  const res = await fetch(url, { signal, cache: 'no-store' });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `API error ${res.status}`);
@@ -59,17 +73,17 @@ export interface Stop {
   lon: number;
   wheelchairBoarding: number | null;
   distanceMetres?: number;
-  nextDeparture?: Departure | null;
+  nextArrival?: Arrival | null;
   routes?: StopRouteRef[];
 }
 
-export interface Departure {
+export interface Arrival {
   tripId: string;
   routeId: string;
   routeShortName: string | null;
   routeLongName: string | null;
   headsign: string | null;
-  scheduledDeparture: string;
+  realtimeArrival: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
   directionId: number | null;
@@ -89,8 +103,6 @@ export interface TripStop {
   stopCode: string | null;
   lat: number;
   lon: number;
-  scheduledArrival: string | null;
-  scheduledDeparture: string | null;
 }
 
 export interface Vehicle {
@@ -118,7 +130,8 @@ export interface Agency {
   key: string;
   displayName: string;
   timezone: string;
-  hasRealtime: boolean;
+  hasRealtimePositions: boolean;
+  hasRealtimeTripUpdates: boolean;
   lastIngestedAt: string | null;
 }
 
@@ -158,16 +171,16 @@ export function fetchStops(
   return apiFetch<{ data: Stop[]; total: number }>(`/stops?${qs}`, signal);
 }
 
-export function fetchStopDepartures(
+export function fetchStopArrivals(
   stopId: string,
   agencyKey: string,
   params?: { limit?: number; after?: string },
-): Promise<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }> {
+): Promise<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }> {
   const qs = new URLSearchParams({ agencyKey });
   if (params?.limit !== undefined) qs.set('limit', String(params.limit));
   if (params?.after) qs.set('after', params.after);
-  return apiFetch<{ data: Departure[]; stopId: string; agencyKey: string; stopName: string }>(
-    `/stops/${encodeURIComponent(stopId)}/departures?${qs}`,
+  return apiFetch<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }>(
+    `/stops/${encodeURIComponent(stopId)}/arrivals?${qs}`,
   );
 }
 

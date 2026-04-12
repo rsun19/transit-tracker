@@ -9,16 +9,18 @@
 
 ### User Story 1 - Route & Stop Discovery (Priority: P1)
 
-A rider opens the application and searches for transit routes by name or number. They can also look up a specific stop to see which routes serve it and view the day's scheduled departure times. This represents the foundational read layer of the application — the static schedule experience.
+A rider opens the application and searches for transit routes by name or number. They can also look up a specific stop to see which routes serve it and view the day's scheduled arrival times. This represents the foundational read layer of the application — the static schedule experience.
+
+**Note:** All user-facing references in the UI and documentation use arrivals-based terminology. GTFS, database, and API contract fields may retain 'departure' for compatibility and standards compliance.
 
 **Why this priority**: Without the ability to browse routes and stops from ingested GTFS static data, no other feature has value. This is the minimum viable product and the anchor of Phase 1 development.
 
-**Independent Test**: Seed the database with MBTA GTFS static data, then search for a route (e.g., "Red Line") and confirm the correct stop list, stop sequence, and departure times are displayed without any realtime components running.
+**Independent Test**: Seed the database with MBTA GTFS static data, then search for a route (e.g., "Red Line") and confirm the correct stop list, stop sequence, and arrival times are displayed without any realtime components running.
 
 **Acceptance Scenarios**:
 
 1. **Given** GTFS static data has been ingested, **When** a rider searches for a route by name, **Then** a list of matching routes is displayed with their stop sequences
-2. **Given** a route is displayed, **When** the rider selects a stop from the route, **Then** all scheduled departures for that stop for the current day are shown
+2. **Given** a route is displayed, **When** the rider selects a stop from the route, **Then** all scheduled arrivals for that stop for the current day are shown
 3. **Given** a rider searches for a stop by name or code, **When** the search completes, **Then** all routes serving that stop are listed
 4. **Given** the rider enters a search term with no matches, **When** results are returned, **Then** a clear "No results found" message is displayed with a suggestion to try different terms
 5. **Given** the application has just started, **When** no GTFS data has been ingested yet, **Then** the application displays an explicit "No data available yet" state rather than an error
@@ -47,16 +49,16 @@ A rider wants to see where buses or trains are right now on an interactive map. 
 
 ### User Story 3 - Nearby Stops Discovery (Priority: P3)
 
-A rider standing at or near a location wants to see which transit stops are within walking distance (≤ 500 m by default) and view upcoming departures — combining static schedule data with any available realtime delay information — without needing to know stop names or numbers in advance.
+A rider standing at or near a location wants to see which transit stops are within walking distance (≤ 500 m by default) and view upcoming arrivals — combining static schedule data with any available realtime delay information — without needing to know stop names or numbers in advance.
 
 **Why this priority**: Location-aware discovery is the primary mobile use case and dramatically lowers the barrier to entry for new riders unfamiliar with the network.
 
-**Independent Test**: Issue a nearby-stops query with a fixed test coordinate and confirm that stops within 500 m are returned sorted by distance, with upcoming departures listed per stop.
+**Independent Test**: Issue a nearby-stops query with a fixed test coordinate and confirm that stops within 500 m are returned sorted by distance, with upcoming arrivals listed per stop.
 
 **Acceptance Scenarios**:
 
 1. **Given** a rider shares their device location or enters a location manually, **When** they request nearby stops, **Then** all stops within the configured radius (default 500 m) are listed, sorted from nearest to furthest
-2. **Given** nearby stops are listed, **When** the rider selects a stop, **Then** upcoming departures are shown with route name, scheduled time, and real-time delay in minutes (where available)
+2. **Given** nearby stops are listed, **When** the rider selects a stop, **Then** upcoming arrivals are shown with route name, scheduled time, and real-time delay in minutes (where available)
 3. **Given** the rider's browser denies location permission, **When** the nearby-stops feature is opened, **Then** a manual location entry field is presented as a fallback with no loss of core functionality
 4. **Given** no stops exist within the search radius, **When** the search completes, **Then** the application shows a "No stops found nearby" message and offers a "Search wider area" option that doubles the radius
 
@@ -94,14 +96,14 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 ### Functional Requirements
 
 - **FR-001**: The system MUST provide a searchable and browsable catalog of transit routes and stops populated from ingested GTFS static data
-- **FR-002**: The system MUST display all scheduled departure times for a selected stop for the current service day
+- **FR-002**: The system MUST display all scheduled arrival times for a selected stop for the current service day (user-facing; GTFS/DB/API fields may use 'departure' for compatibility)
 - **FR-003**: The system MUST display live vehicle positions on an OpenStreetMap-based interactive map, with positions no more than 30 seconds stale under normal conditions
 - **FR-004**: The system MUST allow riders to discover transit stops within a configurable radius of a given location (default: 500 m), sorted by distance
 - **FR-005**: The system MUST serve all transit data (static and realtime) exclusively through a unified HTTP API; the frontend MUST NOT directly parse or fetch GTFS feeds
 - **FR-006**: The system MUST ingest GTFS static data (ZIP archives of CSV files) automatically on a scheduled basis without manual operator intervention
 - **FR-007**: The system MUST poll GTFS Realtime feeds for vehicle positions, trip updates, and service alerts at a configurable interval (default: every 15 seconds)
 - **FR-008**: The system MUST store realtime vehicle positions in a fast-access cache with a time-to-live of 10–15 seconds
-- **FR-009**: The system MUST cache API responses for nearby-stop queries and departure lists with appropriate short-lived time-to-live values (15–60 seconds)
+- **FR-009**: The system MUST cache API responses for nearby-stop queries and arrivals lists with appropriate short-lived time-to-live values (15–60 seconds)
 - **FR-010**: Transit agency sources MUST be fully config-driven; adding a new agency MUST require only a configuration file change and no code changes
 - **FR-011**: The entire application stack MUST start successfully from a clean state using a single `docker compose up` command
 - **FR-012**: Route shapes MUST be rendered as coloured polylines on the map so riders can visually trace a route's path
@@ -109,7 +111,7 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 - **FR-014**: Every data-driven view MUST have an explicit loading state and an explicit empty/no-results state; blank or spinner-only screens are not acceptable
 - **FR-015**: The system MUST support efficient geospatial queries including nearest-stop lookup and bounding-box filtering
 - **FR-016**: Agency API keys MUST be supplied via environment variables and MUST NOT be stored in version-controlled configuration files
-- **FR-017**: The system MUST expose the following HTTP endpoints at minimum: stop search, stop departures, route list, route detail, nearby stops, live vehicle positions, and service alerts
+- **FR-017**: The system MUST expose the following HTTP endpoints at minimum: stop search, stop arrivals (or departures for GTFS/API compatibility), route list, route detail, nearby stops, live vehicle positions, and service alerts
 - **FR-018**: All HTTP API endpoints MUST follow a consistent RESTful URL convention with versioning support (e.g., `/api/v1/stops`)
 - **FR-019**: GTFS static feed re-ingestion for an existing agency MUST perform a full atomic replacement — all existing records for that agency are deleted and new records inserted within a single database transaction; partial or additive merges are not permitted
 - **FR-020**: The NGINX reverse proxy MUST enforce per-IP rate limiting of 60 requests per minute on all routes; requests exceeding this limit MUST receive a `429 Too Many Requests` response
@@ -129,17 +131,17 @@ A system operator wants to add a new transit agency to the platform. By supplyin
 - **Route**: A named path operated by an agency. Has a short name, long name, and mode type (bus, subway, rail, ferry, cable car, etc.). Belongs to one agency.
 - **Stop**: A physical boarding/alighting location. Has a name, stop code, geographic coordinates, and optionally a parent station. May be served by routes from multiple agencies.
 - **Trip**: A specific scheduled run of a vehicle along a route on a given service day. References a route, a service calendar, and an ordered list of stop times.
-- **StopTime**: Associates a stop with a trip at a specific sequence position, recording scheduled arrival and departure times.
+- **StopTime**: Associates a stop with a trip at a specific sequence position, recording scheduled arrival and departure times (GTFS/DB field; user-facing model uses arrivals terminology).
 - **Shape**: An ordered sequence of geographic coordinate points representing the drawn path of a route variant on the map.
 - **VehiclePosition**: A realtime snapshot of a vehicle's current geographic location, assigned route and trip, and last-updated timestamp. Held in the fast-access cache layer.
-- **TripUpdate**: A realtime prediction of arrival and departure times for each remaining stop on an in-progress trip, including delay in seconds.
+- **TripUpdate**: A realtime prediction of arrival and departure times for each remaining stop on an in-progress trip, including delay in seconds (GTFS/DB field; user-facing model uses arrivals terminology).
 - **ServiceAlert**: A realtime notification describing a disruption (delay, detour, suspension) affecting one or more routes, stops, or trips; includes human-readable cause and effect text.
 
 ## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 
-- **SC-001**: A rider can go from opening the application to viewing scheduled departures for a specific stop in under 60 seconds, with no prior knowledge of the interface
+- **SC-001**: A rider can go from opening the application to viewing scheduled arrivals for a specific stop in under 60 seconds, with no prior knowledge of the interface
 - **SC-002**: The complete application stack starts and reaches a healthy state from a clean machine using a single command in under 5 minutes
 - **SC-003**: Route and stop search results are presented to the rider within 1 second of submitting a query (p95 across all queries)
 - **SC-004**: Live vehicle positions displayed on the map are never more than 30 seconds behind the realtime feed under normal operating conditions

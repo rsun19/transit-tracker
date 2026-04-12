@@ -8,7 +8,7 @@ const AgencyConfigSchema = z.object({
   displayName: z.string().min(1),
   timezone: z.string().min(1),
   gtfsStaticUrl: z.string().url(),
-  gtfsRealtimeUrl: z.string().url().optional(),
+  gtfsRealtimeVehiclePositionsUrl: z.string().url().optional(),
   gtfsRealtimeTripUpdatesUrl: z.string().url().optional(),
   apiKeyEnvVar: z.string().optional(),
 });
@@ -17,7 +17,8 @@ export type AgencyConfig = z.infer<typeof AgencyConfigSchema>;
 
 export interface ResolvedAgency extends AgencyConfig {
   resolvedApiKey: string | undefined;
-  hasRealtime: boolean;
+  hasRealtimePositions: boolean;
+  hasRealtimeTripUpdates: boolean;
 }
 
 @Injectable()
@@ -60,7 +61,8 @@ export class AgenciesService implements OnModuleInit {
       resolved.push({
         ...config,
         resolvedApiKey,
-        hasRealtime: Boolean(config.gtfsRealtimeUrl),
+        hasRealtimePositions: Boolean(config.gtfsRealtimeVehiclePositionsUrl),
+        hasRealtimeTripUpdates: Boolean(config.gtfsRealtimeTripUpdatesUrl),
       });
     }
 

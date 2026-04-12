@@ -1,26 +1,34 @@
 // All named configuration constants — no magic values in service code
 
+// Default search radius for nearby stops queries (metres)
 export const NEARBY_DEFAULT_RADIUS_M = 500;
+// Hard upper bound on caller-supplied radius for nearby stops queries (metres)
 export const NEARBY_MAX_RADIUS_M = 5000;
 
-// Vehicle realtime cache TTL (seconds) — matches SC-004 (≤30s staleness)
+// Vehicle realtime cache TTL (seconds) — ≤30s staleness
 // AN-01 resolution: aligned to 30s (FR-008 updated accordingly)
 export const VEHICLE_CACHE_TTL_S = 30;
 
-// Alerts cache TTL (seconds)
+// Alerts cache TTL (seconds) — ≤30s staleness
 export const ALERTS_CACHE_TTL_S = 30;
 
 // TripUpdate realtime delay cache TTL (seconds) — hash key per agency
-export const TRIP_UPDATE_CACHE_TTL_S = 30;
+export const TRIP_UPDATE_CACHE_TTL_S = 20;
 
-// API response cache TTLs (seconds)
-export const API_CACHE_DEPARTURES_TTL_S = 20;
-export const API_CACHE_ROUTES_TTL_S = 300;
+// API response cache TTL for arrival lists (seconds) — short TTL keeps
+// countdown timers accurate while avoiding redundant DB queries
+export const API_CACHE_ARRIVALS_TTL_S = 15;
+// API response cache TTL for route lists (seconds) — routes change infrequently
+// so a longer TTL is safe and reduces load on the stop_times index
+export const API_CACHE_ROUTES_TTL_S = 3600; // 1 hour
+// API response cache TTL for nearby stop results (seconds) — slightly longer
+// than arrivals TTL; geo results are stable unless the user moves significantly
 export const API_CACHE_NEARBY_TTL_S = 45;
 
-// Realtime feed polling interval (milliseconds)
+// How often the worker polls each agency's realtime GTFS-RT feed (milliseconds)
 export const REALTIME_POLL_INTERVAL_MS = 15_000;
 
-// Search pagination defaults
+// Default page size for stop search results
 export const DEFAULT_SEARCH_LIMIT = 20;
+// Maximum page size a caller may request for stop search results
 export const MAX_SEARCH_LIMIT = 100;

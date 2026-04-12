@@ -1,4 +1,5 @@
-import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { StopsService } from './stops.service';
 import { NEARBY_MAX_RADIUS_M } from '@/common/constants';
 
@@ -8,6 +9,7 @@ export class StopsController {
 
   @Get('nearby')
   async getNearby(
+    @Res() res: Response,
     @Query('lat') latStr?: string,
     @Query('lon') lonStr?: string,
     @Query('radius') radiusStr?: string,
@@ -30,12 +32,20 @@ export class StopsController {
     }
 
     const limit = limitStr ? parseInt(limitStr, 10) : undefined;
-
-    return this.stopsService.getNearbyStops({ lat, lon, radiusM: radius, agencyKey, limit });
+    res.set('Cache-Control', 'no-store');
+    const data = await this.stopsService.getNearbyStops({
+      lat,
+      lon,
+      radiusM: radius,
+      agencyKey,
+      limit,
+    });
+    return res.json(data);
   }
 
   @Get()
   async search(
+    @Res() res: Response,
     @Query('q') q?: string,
     @Query('agencyKey') agencyKey?: string,
     @Query('limit') limitStr?: string,
@@ -46,11 +56,14 @@ export class StopsController {
     }
     const limit = limitStr ? parseInt(limitStr, 10) : undefined;
     const offset = offsetStr ? parseInt(offsetStr, 10) : undefined;
-    return this.stopsService.search(q, agencyKey, limit, offset);
+    res.set('Cache-Control', 'no-store');
+    const data = await this.stopsService.search(q, agencyKey, limit, offset);
+    return res.json(data);
   }
 
-  @Get(':stopId/departures')
-  async getDepartures(
+  @Get(':stopId/arrivals')
+  async getArrivals(
+    @Res() res: Response,
     @Param('stopId') stopId: string,
     @Query('agencyKey') agencyKey?: string,
     @Query('limit') limitStr?: string,
@@ -58,12 +71,20 @@ export class StopsController {
   ) {
     if (!agencyKey) throw new BadRequestException('agencyKey is required');
     const limit = limitStr ? parseInt(limitStr, 10) : undefined;
-    return this.stopsService.getDepartures(stopId, agencyKey, limit, after);
+    res.set('Cache-Control', 'no-store');
+    const data = await this.stopsService.getArrivals(stopId, agencyKey, limit, after);
+    return res.json(data);
   }
 
   @Get(':stopId/routes')
-  async getRoutesForStop(@Param('stopId') stopId: string, @Query('agencyKey') agencyKey?: string) {
+  async getRoutesForStop(
+    @Res() res: Response,
+    @Param('stopId') stopId: string,
+    @Query('agencyKey') agencyKey?: string,
+  ) {
     if (!agencyKey) throw new BadRequestException('agencyKey is required');
-    return this.stopsService.getRoutesForStop(stopId, agencyKey);
+    res.set('Cache-Control', 'no-store');
+    const data = await this.stopsService.getRoutesForStop(stopId, agencyKey);
+    return res.json(data);
   }
 }
