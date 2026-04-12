@@ -271,10 +271,11 @@ export class StopsService {
         // Format as ISO string in UTC (Postgres expects this for timestamp comparison)
         afterTimestamp = afterDate.toISOString();
       } else {
-        afterTimestamp = new Date().toISOString();
+        afterTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       }
     } else {
-      afterTimestamp = new Date().toISOString();
+      // Default: 10 minutes before now
+      afterTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     }
 
     const rows = await this.dataSource.query<Array<ArrivalRow>>(
