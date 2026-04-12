@@ -106,8 +106,8 @@ jobs:
   cypress-map:
     name: cypress-map
     runs-on: ubuntu-latest
-    env:
-      CI: true
+    # env:
+    #   CI: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -150,8 +150,8 @@ jobs:
   cypress-stops:
     name: cypress-stops
     runs-on: ubuntu-latest
-    env:
-      CI: true
+    # env:
+    #   CI: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -194,8 +194,8 @@ jobs:
   cypress-routes:
     name: cypress-routes
     runs-on: ubuntu-latest
-    env:
-      CI: true
+    # env:
+    #   CI: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -238,8 +238,8 @@ jobs:
   cypress-core-smoke:
     name: cypress-core-smoke
     runs-on: ubuntu-latest
-    env:
-      CI: true
+    # env:
+    #   CI: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
