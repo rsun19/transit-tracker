@@ -35,7 +35,6 @@ function stop(
     stopCode: null,
     lat: BASE_LAT + latOffset,
     lon: BASE_LON + lonOffset,
-    wheelchairBoarding: null,
     routes,
   };
 }

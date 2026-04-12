@@ -23,8 +23,9 @@
     "test:e2e": "node scripts/e2e/run-all-cypress-headless.mjs",
     "test:e2e:group": "node scripts/e2e/run-cypress-group.mjs",
     "test:e2e:open": "node scripts/e2e/open-cypress-interactive.mjs",
+    "test:e2e:local": "bash scripts/e2e/run-local-e2e.sh",
     "typecheck": "node scripts/ci/typecheck-workspace.mjs",
-    "test:all": "npm run lint && npm run format:check && npm run test:unit && npm run test:integration && npm run test:contract && npm run test:a11y && npm run test:performance && npm run test:e2e",
+    "test:all": "npm run lint && npm run format:check && npm run test:unit && npm run test:integration && npm run test:contract && npm run test:a11y && npm run test:performance && npm run test:e2e:local",
     "test": "npm run test:all",
     "ci:gate": "node scripts/ci/run-gate.mjs",
     "ci:assert-checks": "node scripts/ci/assert-required-checks.mjs"

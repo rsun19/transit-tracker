@@ -1,4 +1,5 @@
-import { Controller, Get, Query, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Query, ServiceUnavailableException, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { CacheService } from '@/modules/cache/cache.service';
 import { AgenciesService } from '@/modules/agencies/agencies.service';
 
@@ -10,7 +11,7 @@ export class VehiclesController {
   ) {}
 
   @Get('live')
-  async getLive(@Query('agencyKey') agencyKey?: string) {
+  async getLive(@Res() res: Response, @Query('agencyKey') agencyKey?: string) {
     const agencies = agencyKey
       ? [this.agenciesService.getAgencyByKey(agencyKey)].filter(Boolean)
       : this.agenciesService.getAllAgencies().filter((a) => a.hasRealtimePositions);
@@ -36,6 +37,7 @@ export class VehiclesController {
       results.push({ agencyKey: agency.key, vehicles: data });
     }
 
-    return { data: results };
+    res.set('Cache-Control', 'no-store');
+    return res.json({ data: results });
   }
 }

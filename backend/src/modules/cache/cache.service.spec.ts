@@ -82,4 +82,42 @@ describe('CacheService', () => {
       expect(service.getClient()).toBe(mockRedis);
     });
   });
+
+  describe('onModuleDestroy()', () => {
+    it('calls redis.quit if available and logs success', async () => {
+      const quit = jest.fn().mockResolvedValue(undefined);
+      const disconnect = jest.fn();
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const redis = { quit, disconnect };
+      const service = new CacheService(redis as never);
+      await service.onModuleDestroy();
+      expect(quit).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith('Redis connection closed');
+      logSpy.mockRestore();
+    });
+
+    it('calls redis.disconnect if quit is not available', async () => {
+      const disconnect = jest.fn();
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const redis = { disconnect };
+      const service = new CacheService(redis as never);
+      await service.onModuleDestroy();
+      expect(disconnect).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith('Redis connection closed');
+      logSpy.mockRestore();
+    });
+
+    it('logs a warning if shutdown throws', async () => {
+      const quit = jest.fn().mockRejectedValue(new Error('fail'));
+      const disconnect = jest.fn();
+      const redis = { quit, disconnect };
+      const service = new CacheService(redis as never);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      await service.onModuleDestroy();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to close Redis connection: fail'),
+      );
+      warnSpy.mockRestore();
+    });
+  });
 });

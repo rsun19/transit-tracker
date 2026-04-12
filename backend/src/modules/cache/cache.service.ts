@@ -2,8 +2,23 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from './cache.constants';
 
+import { OnModuleDestroy } from '@nestjs/common';
+
 @Injectable()
-export class CacheService {
+export class CacheService implements OnModuleDestroy {
+  async onModuleDestroy(): Promise<void> {
+    try {
+      // Prefer quit() for graceful shutdown, fallback to disconnect()
+      if (typeof this.redis.quit === 'function') {
+        await this.redis.quit();
+      } else if (typeof this.redis.disconnect === 'function') {
+        this.redis.disconnect();
+      }
+      this.logger.log('Redis connection closed');
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to close Redis connection: ${(err as Error).message}`);
+    }
+  }
   private readonly logger = new Logger(CacheService.name);
 
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}

@@ -65,8 +65,11 @@ export class GtfsRealtimeService {
 
     const vehicles: VehiclePosition[] = [];
     const alerts: ServiceAlert[] = [];
-    // tripId -> delay in seconds (from TripUpdate stop time updates)
-    const tripDelays = new Map<string, number>();
+    // tripId -> { [stopId]: { arrivalTime?: number, delay?: number } }
+    const tripRealtime: Map<
+      string,
+      Record<string, { arrivalTime?: number; delay?: number }>
+    > = new Map();
     // unscheduled/ADDED trips keyed by tripId
     const addedTrips = new Map<string, AddedTripData>();
     const now = new Date().toISOString();
@@ -94,7 +97,7 @@ export class GtfsRealtimeService {
       }
       const buffer = await response.arrayBuffer();
       const feed = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
-      this.processTripUpdates(feed, validTripIds, tripDelays, addedTrips);
+      this.processTripUpdates(feed, validTripIds, tripRealtime, addedTrips);
     }
 
     // Write to Redis via pipeline (FR-007, FR-008)
@@ -109,14 +112,12 @@ export class GtfsRealtimeService {
     }
     pipeline.set(alertKey, JSON.stringify(alerts), 'EX', ALERTS_CACHE_TTL_S);
 
-    if (tripDelays.size > 0) {
+    if (tripRealtime.size > 0) {
       const tripUpdateKey = `trip_updates:${agencyConfig.key}`;
       const hash: Record<string, string> = {};
-      tripDelays.forEach((delay, tid) => {
-        hash[tid] = String(delay);
+      tripRealtime.forEach((stopMap, tid) => {
+        hash[tid] = JSON.stringify(stopMap);
       });
-      // DEL before HSET — same reason as added_trips: each cycle must be a
-      // clean snapshot so cancelled/ended trips don't keep showing as delayed.
       pipeline.del(tripUpdateKey);
       pipeline.hset(tripUpdateKey, hash);
       pipeline.expire(tripUpdateKey, TRIP_UPDATE_CACHE_TTL_S);
@@ -144,7 +145,7 @@ export class GtfsRealtimeService {
     await pipeline.exec();
 
     this.logger.log(
-      `Realtime poll complete for ${agencyConfig.key}: ${vehicles.length} vehicles, ${alerts.length} alerts, ${tripDelays.size} trip updates, ${addedTrips.size} added trips`,
+      `Realtime poll complete for ${agencyConfig.key}: ${vehicles.length} vehicles, ${alerts.length} alerts, ${tripRealtime.size} trip updates, ${addedTrips.size} added trips`,
     );
   }
 
@@ -203,7 +204,7 @@ export class GtfsRealtimeService {
   private processTripUpdates(
     feed: transit_realtime.FeedMessage,
     validTripIds: Set<string>,
-    tripDelays: Map<string, number>,
+    tripRealtime: Map<string, Record<string, { arrivalTime?: number; delay?: number }>>,
     addedTrips: Map<string, AddedTripData>,
   ): void {
     for (const entity of feed.entity) {
@@ -213,13 +214,27 @@ export class GtfsRealtimeService {
       if (!tripId) continue;
 
       if (validTripIds.has(tripId)) {
-        // Scheduled trip — extract delay from first stop time update (arrival-based)
+        // Scheduled trip — store per-stop arrivalTime and/or delay
+        const stopMap: Record<
+          string,
+          { arrivalTime?: number; delay?: number; realtimeArrival?: string }
+        > = {};
         for (const stu of tu.stopTimeUpdate ?? []) {
-          const delay = stu.arrival?.delay ?? stu.departure?.delay ?? null;
-          if (delay !== null && delay !== undefined) {
-            tripDelays.set(tripId, Number(delay));
-            break;
+          const sid = stu.stopId;
+          if (!sid) continue;
+          const arrivalTime = stu.arrival?.time != null ? Number(stu.arrival.time) : undefined;
+          const delay = stu.arrival?.delay != null ? Number(stu.arrival.delay) : undefined;
+          if (arrivalTime !== undefined || delay !== undefined) {
+            stopMap[sid] = {};
+            if (arrivalTime !== undefined) {
+              stopMap[sid].arrivalTime = arrivalTime;
+              stopMap[sid].realtimeArrival = new Date(arrivalTime * 1000).toISOString();
+            }
+            if (delay !== undefined) stopMap[sid].delay = delay;
           }
+        }
+        if (Object.keys(stopMap).length > 0) {
+          tripRealtime.set(tripId, stopMap);
         }
       } else {
         // Unscheduled / ADDED trip — collect absolute stop arrival timestamps

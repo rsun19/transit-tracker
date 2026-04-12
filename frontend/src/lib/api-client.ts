@@ -1,7 +1,21 @@
 const API_BASE = '/api/v1';
 
+// Get BACKEND_URL from env for SSR
+function getApiBaseUrl() {
+  // On the server, use process.env.BACKEND_URL
+  if (typeof window === 'undefined') {
+    // Next.js exposes env vars prefixed with NEXT_PUBLIC_ to the browser, but for SSR we use process.env
+    return process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api/v1` : API_BASE;
+  }
+  // On the client, use relative path
+  return API_BASE;
+}
+
 async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { signal });
+  const baseUrl = getApiBaseUrl();
+  const url =
+    baseUrl.endsWith('/') && path.startsWith('/') ? baseUrl.slice(0, -1) + path : baseUrl + path;
+  const res = await fetch(url, { signal, cache: 'no-store' });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `API error ${res.status}`);
@@ -70,7 +84,7 @@ export interface Arrival {
   routeShortName: string | null;
   routeLongName: string | null;
   headsign: string | null;
-  scheduledArrival: string;
+  realtimeArrival: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
   directionId: number | null;

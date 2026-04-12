@@ -13,7 +13,7 @@ import {
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
 } from '@/common/constants';
-// import { reconcileAddedTrips } from './reconcileAddedTrips';
+import { reconcileAddedTrips } from './reconcileAddedTrips';
 import { mergeColocatedStops } from './mergeColocatedStops';
 import {
   StopRouteRef,
@@ -21,25 +21,8 @@ import {
   ArrivalResponse,
   AddedTripEntry,
   AddedTrip,
+  ArrivalRow,
 } from './stops.types';
-
-/** Maximum window (ms) within which an ADDED trip is matched to a scheduled slot. */
-export const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
-
-/**
- * Reconcile ADDED/unscheduled realtime trips against a list of scheduled arrivals.
- *
- * Many agencies (including MBTA) publish realtime predictions for scheduled trips
- * under opaque ADDED-xxx trip IDs. This function:
- *  1. Sorts ADDED entries by arrival time ascending so high-frequency routes are
- *     matched correctly (earlier trains claim their slot first).
- *  2. For each ADDED entry, finds the nearest unmatched scheduled trip for the same
- *     routeId + directionId within RECONCILE_WINDOW_MS.
- *  3a. Match found → merges realtime delay into the scheduled row (mutates in place).
- *  3b. No match → appends the ADDED entry as genuinely new extra service.
- *
- * Mutates `arrivals` in place and returns it for convenience.
- */
 
 @Injectable()
 export class StopsService {
@@ -167,7 +150,6 @@ export class StopsService {
       stopCode: row.stop_code,
       lat: parseFloat(row.lat),
       lon: parseFloat(row.lon),
-      wheelchairBoarding: row.wheelchair_boarding,
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
@@ -281,22 +263,12 @@ export class StopsService {
     const todayStr = dateFmt.format(new Date());
     const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
 
-    const rows = await this.dataSource.query<
-      Array<{
-        trip_id: string;
-        route_id: string;
-        short_name: string | null;
-        long_name: string | null;
-        trip_headsign: string | null;
-        arrival_time: string;
-        direction_id: number | null;
-      }>
-    >(
+    const rows = await this.dataSource.query<Array<ArrivalRow>>(
       // stop_slice uses ANY($1) to cover all effective stop_ids in one index scan.
       // today_services is now keyed on agencyId ($2 UUID) directly, removing the
       // inner agency_key subquery that was needed when stopId was the only input.
       `WITH stop_slice AS MATERIALIZED (
-         SELECT st.trip_id, st.agency_id, st.arrival_time
+         SELECT st.trip_id, st.agency_id, st.arrival_time, st.stop_id
          FROM stop_times st
          WHERE st.stop_id = ANY($1) AND st.agency_id = $2
        ),
@@ -321,21 +293,22 @@ export class StopsService {
        -- contains several platforms it serves (e.g. colocated inbound/outbound bus stops).
        -- The subquery picks the earliest arrival for each (trip_id, service_date) pair,
        -- then the outer query re-sorts and applies the limit.
-       SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time
-       FROM (
-         SELECT DISTINCT ON (t.trip_id, ts.d)
-                ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-                t.direction_id,
-                ((ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time
-         FROM stop_slice ss
-         JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
-         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
-         JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
-         WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= NOW()
-         ORDER BY t.trip_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
-       ) deduped
-       ORDER BY arrival_time ASC
-       LIMIT $6`,
+      SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time, stop_id
+      FROM (
+        SELECT DISTINCT ON (t.trip_id, ts.d)
+          ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
+          t.direction_id,
+          ((ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
+          ss.stop_id
+        FROM stop_slice ss
+        JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
+        JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
+        JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
+        WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= NOW()
+        ORDER BY t.trip_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
+      ) deduped
+      ORDER BY arrival_time ASC
+      LIMIT $6`,
       [
         effectiveStopIds,
         agencyId,
@@ -346,16 +319,29 @@ export class StopsService {
       ],
     );
 
-    // Look up realtime delays for all returned trips in one Redis HMGET round-trip.
-    const delayMap = new Map<string, number>();
+    // Map: trip_id -> stop_id -> { arrivalTime, delay }
+    const realtimeMap = new Map<string, Record<string, { arrivalTime?: number; delay?: number }>>();
     if (rows.length > 0) {
       try {
         const redis = this.cacheService.getClient();
         const tripIds = rows.map((r) => r.trip_id);
-        const delayValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
+        const realtimeValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
         tripIds.forEach((tripId, i) => {
-          const val = delayValues[i];
-          if (val !== null) delayMap.set(tripId, parseInt(val, 10));
+          const val = realtimeValues[i];
+          if (val !== null) {
+            try {
+              const parsed = JSON.parse(val);
+              if (parsed && typeof parsed === 'object') {
+                realtimeMap.set(tripId, parsed);
+              }
+            } catch {
+              // fallback: legacy value (delay as int)
+              const delay = parseInt(val, 10);
+              if (!isNaN(delay)) {
+                realtimeMap.set(tripId, { legacy: { delay } });
+              }
+            }
+          }
         });
       } catch {
         // Redis unavailable — fall back to scheduled-only arrivals
@@ -363,18 +349,43 @@ export class StopsService {
     }
 
     const data: ArrivalResponse[] = rows.map((row) => {
-      const delay = delayMap.get(row.trip_id) ?? null;
-      return {
+      const tripRealtime = realtimeMap.get(row.trip_id) ?? {};
+      // Only use realtime if the stop_id for this row is present in the realtime update
+      const stopRealtime = tripRealtime[row.stop_id] ?? null;
+      let realtimeArrival: string = row.arrival_time; // fallback to scheduled
+      let realtimeDelay: number | null = null;
+      let hasRealtime = false;
+      if (stopRealtime) {
+        const rt = stopRealtime as {
+          arrivalTime?: number;
+          delay?: number;
+          realtimeArrival?: string;
+        };
+        if (typeof rt.realtimeArrival === 'string') {
+          realtimeArrival = rt.realtimeArrival;
+          hasRealtime = true;
+        } else if (rt.arrivalTime) {
+          realtimeArrival = new Date(rt.arrivalTime * 1000).toISOString();
+          hasRealtime = true;
+        }
+        if (typeof rt.delay === 'number') {
+          realtimeDelay = rt.delay;
+          hasRealtime = true;
+        }
+      }
+
+      const result = {
         tripId: row.trip_id,
         routeId: row.route_id,
         routeShortName: row.short_name,
         routeLongName: row.long_name,
         headsign: row.trip_headsign,
-        scheduledArrival: row.arrival_time,
-        realtimeDelaySeconds: delay,
-        hasRealtime: delay !== null,
+        realtimeArrival,
+        realtimeDelaySeconds: realtimeDelay,
+        hasRealtime,
         directionId: row.direction_id ?? null,
       };
+      return result;
     });
 
     // Merge unscheduled / ADDED realtime trips from Redis
@@ -434,20 +445,7 @@ export class StopsService {
             headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
           }));
 
-          // reconcileAddedTrips(data, entries);
-          for (const entry of entries) {
-            data.push({
-              tripId: entry.trip.tripId,
-              routeId: entry.trip.routeId,
-              routeShortName: entry.routeShortName,
-              routeLongName: entry.routeLongName,
-              headsign: entry.trip.headsign ?? entry.headsignFallback,
-              scheduledArrival: new Date(entry.arrivalTime * 1000).toISOString(),
-              realtimeDelaySeconds: 0,
-              hasRealtime: true,
-              directionId: entry.trip.directionId,
-            });
-          }
+          reconcileAddedTrips(data, entries);
         }
       }
     } catch {
@@ -457,8 +455,8 @@ export class StopsService {
     // Re-sort by effective arrival time (scheduled + delay) so realtime-advanced
     // arrivals are not buried behind later scheduled-order entries
     data.sort((a, b) => {
-      const aEff = new Date(a.scheduledArrival).getTime() + (a.realtimeDelaySeconds ?? 0) * 1000;
-      const bEff = new Date(b.scheduledArrival).getTime() + (b.realtimeDelaySeconds ?? 0) * 1000;
+      const aEff = new Date(a.realtimeArrival).getTime() + (a.realtimeDelaySeconds ?? 0) * 1000;
+      const bEff = new Date(b.realtimeArrival).getTime() + (b.realtimeDelaySeconds ?? 0) * 1000;
       return aEff - bEff;
     });
 
@@ -478,6 +476,12 @@ export class StopsService {
       routeType: number;
     }[];
   }> {
+    const cacheKey = `cache:stops:routes:${agencyKey}:${stopId}`;
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) {
+      return { data: JSON.parse(cached) };
+    }
+
     const rows = await this.dataSource.query<
       Array<{
         route_id: string;
@@ -496,14 +500,15 @@ export class StopsService {
       [stopId, agencyKey],
     );
 
-    return {
-      data: rows.map((r) => ({
-        routeId: r.route_id,
-        shortName: r.short_name,
-        longName: r.long_name,
-        routeType: r.route_type,
-      })),
-    };
+    const data = rows.map((r) => ({
+      routeId: r.route_id,
+      shortName: r.short_name,
+      longName: r.long_name,
+      routeType: r.route_type,
+    }));
+    // Cache for 24 hours (86400 seconds) since route/stop metadata is static
+    await this.cacheService.set(cacheKey, JSON.stringify(data), 86400);
+    return { data };
   }
 
   async getNearbyStops(params: {
@@ -647,7 +652,6 @@ export class StopsService {
         stopCode: row.stop_code,
         lat: row.lat,
         lon: row.lon,
-        wheelchairBoarding: row.wheelchair_boarding,
         distanceMetres: Math.round(row.distance_metres),
         routes: routesByStopId.get(row.stop_id) ?? [],
       };
@@ -775,7 +779,7 @@ export class StopsService {
         routeShortName: row.short_name,
         routeLongName: row.long_name,
         headsign: row.trip_headsign,
-        scheduledArrival: row.arrival_time,
+        realtimeArrival: row.arrival_time,
         realtimeDelaySeconds: delay,
         hasRealtime: delay !== null,
         directionId: row.direction_id ?? null,

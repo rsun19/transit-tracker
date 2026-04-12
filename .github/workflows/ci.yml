@@ -114,7 +114,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm ci --prefix frontend
-      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - run: CYPRESS=true npm --prefix frontend run dev > frontend-dev.log 2>&1 &
       - name: Wait for frontend
         run: |
           for i in {1..45}; do
@@ -156,7 +156,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm ci --prefix frontend
-      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - run: CYPRESS=true npm --prefix frontend run dev > frontend-dev.log 2>&1 &
       - name: Wait for frontend
         run: |
           for i in {1..45}; do
@@ -198,7 +198,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm ci --prefix frontend
-      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - run: CYPRESS=true npm --prefix frontend run dev > frontend-dev.log 2>&1 &
       - name: Wait for frontend
         run: |
           for i in {1..45}; do
@@ -240,7 +240,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm ci --prefix frontend
-      - run: npm --prefix frontend run dev > frontend-dev.log 2>&1 &
+      - run: CYPRESS=true npm --prefix frontend run dev > frontend-dev.log 2>&1 &
       - name: Wait for frontend
         run: |
           for i in {1..45}; do

@@ -28,11 +28,8 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
   const isEarly = arrival.hasRealtime && delay !== null && delayMinutes < 0;
   const isOnTime = arrival.hasRealtime && delay !== null && delayMinutes === 0;
 
-  // Show effective arrival time (scheduled + delay) when realtime data is available
-  const effectiveIso =
-    arrival.hasRealtime && delay !== null
-      ? new Date(new Date(arrival.scheduledArrival).getTime() + delay * 1000).toISOString()
-      : arrival.scheduledArrival;
+  // Use realtimeArrival directly (already computed by backend)
+  const effectiveIso = arrival.realtimeArrival;
 
   const timeColor = isLate
     ? 'error.main'

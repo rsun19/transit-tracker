@@ -13,14 +13,14 @@ export const VEHICLE_CACHE_TTL_S = 30;
 export const ALERTS_CACHE_TTL_S = 30;
 
 // TripUpdate realtime delay cache TTL (seconds) — hash key per agency
-export const TRIP_UPDATE_CACHE_TTL_S = 30;
+export const TRIP_UPDATE_CACHE_TTL_S = 20;
 
 // API response cache TTL for arrival lists (seconds) — short TTL keeps
 // countdown timers accurate while avoiding redundant DB queries
 export const API_CACHE_ARRIVALS_TTL_S = 20;
 // API response cache TTL for route lists (seconds) — routes change infrequently
 // so a longer TTL is safe and reduces load on the stop_times index
-export const API_CACHE_ROUTES_TTL_S = 300;
+export const API_CACHE_ROUTES_TTL_S = 86400; // 1 day
 // API response cache TTL for nearby stop results (seconds) — slightly longer
 // than arrivals TTL; geo results are stable unless the user moves significantly
 export const API_CACHE_NEARBY_TTL_S = 45;

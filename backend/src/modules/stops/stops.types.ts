@@ -1,3 +1,15 @@
+// Row type for arrivals query result
+export type ArrivalRow = {
+  trip_id: string;
+  route_id: string;
+  short_name: string | null;
+  long_name: string | null;
+  trip_headsign: string | null;
+  arrival_time: string;
+  direction_id: number | null;
+  stop_id: string;
+};
+
 export type AddedTrip = {
   tripId: string;
   routeId: string;
@@ -19,7 +31,6 @@ export interface StopResponse {
   stopCode: string | null;
   lat: number;
   lon: number;
-  wheelchairBoarding: number | null;
   distanceMetres?: number;
   routes?: StopRouteRef[];
 }
@@ -30,7 +41,7 @@ export interface ArrivalResponse {
   routeShortName: string | null;
   routeLongName: string | null;
   headsign: string | null;
-  scheduledArrival: string;
+  realtimeArrival: string;
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
   directionId: number | null;
