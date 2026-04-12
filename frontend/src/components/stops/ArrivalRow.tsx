@@ -10,15 +10,20 @@ interface ArrivalRowProps {
   arrival: Arrival;
 }
 
-function formatTime(isoString: string): string {
-  try {
-    // Backend sends ISO timestamps in UTC (converted from agency's timezone).
-    // toLocaleTimeString() automatically converts to the browser's local timezone.
-    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    /* istanbul ignore next */
-  } catch {
-    return isoString;
-  }
+import { useEffect, useState } from 'react';
+
+function useHydratedTime(isoString: string): string {
+  const [localTime, setLocalTime] = useState<string>(isoString);
+  useEffect(() => {
+    try {
+      setLocalTime(
+        new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      );
+    } catch {
+      setLocalTime(isoString);
+    }
+  }, [isoString]);
+  return localTime;
 }
 export function ArrivalRow({ arrival }: ArrivalRowProps) {
   const delay = arrival.realtimeDelaySeconds;
@@ -42,6 +47,7 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
   // Prefer short name, fall back to long name (e.g. "Red Line"), then route ID
   const routeLabel = arrival.routeShortName || arrival.routeLongName || arrival.routeId;
 
+  const hydratedTime = useHydratedTime(effectiveIso);
   return (
     <TableRow hover>
       <TableCell>
@@ -52,7 +58,7 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
       </TableCell>
       <TableCell>
         <Typography variant="body2" sx={{ color: timeColor }}>
-          {formatTime(effectiveIso)}
+          {hydratedTime}
         </Typography>
       </TableCell>
       <TableCell>
