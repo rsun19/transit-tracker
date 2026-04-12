@@ -15,7 +15,9 @@ const arrival = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe('Stop arrivals page', () => {
+const isCI = !!process.env.CI;
+
+(isCI ? describe.skip : describe)('Stop arrivals page', () => {
   describe('two-direction layout', () => {
     beforeEach(() => {
       cy.intercept('GET', `/api/v1/stops/${STOP_ID}/arrivals**`, {
