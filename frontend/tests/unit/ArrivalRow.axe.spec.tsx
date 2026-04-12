@@ -9,39 +9,39 @@ import type { Arrival } from '../../src/lib/api-client';
 describe('ArrivalRow accessibility', () => {
   expect.extend(toHaveNoViolations);
 
-  const scheduledArrival: Arrival = {
+  const realtimeArrival: Arrival = {
     tripId: 'trip-1',
     routeId: 'Red',
     routeShortName: 'Red',
     routeLongName: 'Red Line',
     headsign: 'Ashmont',
-    scheduledArrival: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    realtimeArrival: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     realtimeDelaySeconds: null,
     hasRealtime: false,
     directionId: null,
   };
 
   const onTimeArrival: Arrival = {
-    ...scheduledArrival,
+    ...realtimeArrival,
     realtimeDelaySeconds: 0,
     hasRealtime: true,
   };
 
   const lateArrival: Arrival = {
-    ...scheduledArrival,
+    ...realtimeArrival,
     realtimeDelaySeconds: 180,
     hasRealtime: true,
   };
 
   const earlyArrival: Arrival = {
-    ...scheduledArrival,
+    ...realtimeArrival,
     realtimeDelaySeconds: -120,
     hasRealtime: true,
   };
 
   // Subway route with no short name (e.g. Red Line in MBTA GTFS)
   const subwayArrival: Arrival = {
-    ...scheduledArrival,
+    ...realtimeArrival,
     routeShortName: '',
     routeLongName: 'Red Line',
   };
@@ -57,7 +57,7 @@ describe('ArrivalRow accessibility', () => {
 
   describe('ArrivalRow accessibility', () => {
     it('has no axe violations for scheduled arrival', async () => {
-      const { container } = render(wrap(<ArrivalRow arrival={scheduledArrival} />));
+      const { container } = render(wrap(<ArrivalRow arrival={realtimeArrival} />));
       const results = await axe(container);
       expect(results).toHaveNoViolations();
     });

@@ -1,5 +1,3 @@
-'use server';
-
 import dynamic from 'next/dynamic';
 import { fetchStopArrivals, fetchAlerts } from '@/lib/api-client';
 import { shouldSkipSSRForCypress } from '@/app/common/ssr-cypress-utils';

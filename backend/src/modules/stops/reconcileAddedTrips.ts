@@ -35,6 +35,7 @@ export function reconcileAddedTrips(
     if (bestIdx !== -1) {
       reconciledIndices.add(bestIdx);
       const schedMs = new Date(arrivals[bestIdx].realtimeArrival).getTime();
+      arrivals[bestIdx].realtimeArrival = new Date(addedMs).toISOString();
       arrivals[bestIdx].realtimeDelaySeconds = Math.round((addedMs - schedMs) / 1000);
       arrivals[bestIdx].hasRealtime = true;
       if (!arrivals[bestIdx].headsign) {

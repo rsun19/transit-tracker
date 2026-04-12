@@ -27,8 +27,20 @@ if ! curl -fsS http://127.0.0.1:3001 >/dev/null; then
   exit 1
 fi
 
-# Run Cypress E2E tests (map group by default)
-CYPRESS_GROUP=map node scripts/e2e/run-cypress-group.mjs
+
+# Run Cypress E2E tests for all groups (or a specific group if CYPRESS_GROUP is set)
+GROUPS=(map stops routes core-smoke)
+if [ -n "${CYPRESS_GROUP:-}" ]; then
+  GROUPS=($CYPRESS_GROUP)
+fi
+
+for group in "${GROUPS[@]}"; do
+  CYPRESS_GROUP="$group" node scripts/e2e/run-cypress-group.mjs || {
+    kill $FRONTEND_PID
+    wait $FRONTEND_PID 2>/dev/null || true
+    exit 1
+  }
+done
 
 # Stop frontend
 kill $FRONTEND_PID

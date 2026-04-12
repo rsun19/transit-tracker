@@ -31,7 +31,6 @@ export interface RouteStop {
   latitude: number;
   longitude: number;
   stopSequence: number;
-  scheduledArrival: string;
 }
 
 export interface RouteBranch {
@@ -104,7 +103,6 @@ export interface TripStop {
   stopCode: string | null;
   lat: number;
   lon: number;
-  scheduledArrival: string | null;
 }
 
 export interface Vehicle {

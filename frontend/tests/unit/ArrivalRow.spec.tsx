@@ -12,7 +12,7 @@ const BASE: Arrival = {
   routeShortName: 'Red',
   routeLongName: 'Red Line',
   headsign: 'Ashmont',
-  scheduledArrival: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  realtimeArrival: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   realtimeDelaySeconds: null,
   hasRealtime: false,
   directionId: 1,

@@ -263,10 +263,21 @@ export class StopsService {
     const todayStr = dateFmt.format(new Date());
     const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
 
+    // Parse 'after' param to a timestamp string in the agency's timezone, fallback to now
+    let afterTimestamp: string;
+    if (after) {
+      const afterDate = new Date(after);
+      if (!isNaN(afterDate.getTime())) {
+        // Format as ISO string in UTC (Postgres expects this for timestamp comparison)
+        afterTimestamp = afterDate.toISOString();
+      } else {
+        afterTimestamp = new Date().toISOString();
+      }
+    } else {
+      afterTimestamp = new Date().toISOString();
+    }
+
     const rows = await this.dataSource.query<Array<ArrivalRow>>(
-      // stop_slice uses ANY($1) to cover all effective stop_ids in one index scan.
-      // today_services is now keyed on agencyId ($2 UUID) directly, removing the
-      // inner agency_key subquery that was needed when stopId was the only input.
       `WITH stop_slice AS MATERIALIZED (
          SELECT st.trip_id, st.agency_id, st.arrival_time, st.stop_id
          FROM stop_times st
@@ -289,10 +300,6 @@ export class StopsService {
                  WHEN 6 THEN sc.saturday
                END = true
        )
-       -- Deduplicate: a trip can appear in stop_slice multiple times when effectiveStopIds
-       -- contains several platforms it serves (e.g. colocated inbound/outbound bus stops).
-       -- The subquery picks the earliest arrival for each (trip_id, service_date) pair,
-       -- then the outer query re-sorts and applies the limit.
       SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time, stop_id
       FROM (
         SELECT DISTINCT ON (t.trip_id, ts.d)
@@ -304,17 +311,18 @@ export class StopsService {
         JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
         JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
-        WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= NOW()
+        WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= $6::timestamp
         ORDER BY t.trip_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
       ) deduped
       ORDER BY arrival_time ASC
-      LIMIT $6`,
+      LIMIT $7`,
       [
         effectiveStopIds,
         agencyId,
         todayStr,
         yesterdayStr,
         timezone,
+        afterTimestamp,
         Math.min(limit, MAX_SEARCH_LIMIT),
       ],
     );
@@ -353,6 +361,7 @@ export class StopsService {
       // Only use realtime if the stop_id for this row is present in the realtime update
       const stopRealtime = tripRealtime[row.stop_id] ?? null;
       let realtimeArrival: string = row.arrival_time; // fallback to scheduled
+      let realtimeArrivalSeconds: number = new Date(row.arrival_time).getTime() / 1000;
       let realtimeDelay: number | null = null;
       let hasRealtime = false;
       if (stopRealtime) {
@@ -363,9 +372,11 @@ export class StopsService {
         };
         if (typeof rt.realtimeArrival === 'string') {
           realtimeArrival = rt.realtimeArrival;
+          realtimeArrivalSeconds = new Date(rt.realtimeArrival).getTime() / 1000;
           hasRealtime = true;
         } else if (rt.arrivalTime) {
           realtimeArrival = new Date(rt.arrivalTime * 1000).toISOString();
+          realtimeArrivalSeconds = rt.arrivalTime;
           hasRealtime = true;
         }
         if (typeof rt.delay === 'number') {
@@ -381,6 +392,7 @@ export class StopsService {
         routeLongName: row.long_name,
         headsign: row.trip_headsign,
         realtimeArrival,
+        realtimeArrivalSeconds,
         realtimeDelaySeconds: realtimeDelay,
         hasRealtime,
         directionId: row.direction_id ?? null,
@@ -455,8 +467,9 @@ export class StopsService {
     // Re-sort by effective arrival time (scheduled + delay) so realtime-advanced
     // arrivals are not buried behind later scheduled-order entries
     data.sort((a, b) => {
-      const aEff = new Date(a.realtimeArrival).getTime() + (a.realtimeDelaySeconds ?? 0) * 1000;
-      const bEff = new Date(b.realtimeArrival).getTime() + (b.realtimeDelaySeconds ?? 0) * 1000;
+      // Sort by effective arrival time: realtimeArrival + delay (if present)
+      const aEff = new Date(a.realtimeArrival).getTime() / 1000 + (a.realtimeDelaySeconds ?? 0);
+      const bEff = new Date(b.realtimeArrival).getTime() / 1000 + (b.realtimeDelaySeconds ?? 0);
       return aEff - bEff;
     });
 
@@ -644,27 +657,57 @@ export class StopsService {
       );
     }
 
-    const data: (StopResponse & { nextArrival?: ArrivalResponse | null })[] = rows.map((row) => {
-      const stop: StopResponse & { nextArrival?: ArrivalResponse | null } = {
-        id: row.id,
-        stopId: row.stop_id,
-        stopName: row.stop_name,
-        stopCode: row.stop_code,
-        lat: row.lat,
-        lon: row.lon,
-        distanceMetres: Math.round(row.distance_metres),
-        routes: routesByStopId.get(row.stop_id) ?? [],
-      };
-      if (params.agencyKey !== undefined) {
-        stop.nextArrival = nextArrivalByStopId.get(row.stop_id) ?? null;
-      }
-      return stop;
-    });
+    // Build StopResponse array without nextArrival
+    const stops: StopResponse[] = rows.map((row) => ({
+      id: row.id,
+      stopId: row.stop_id,
+      stopName: row.stop_name,
+      stopCode: row.stop_code,
+      lat: row.lat,
+      lon: row.lon,
+      distanceMetres: Math.round(row.distance_metres),
+      routes: routesByStopId.get(row.stop_id) ?? [],
+    }));
+
+    // Merge colocated stops first
+    const mergedStops = mergeColocatedStops(stops);
+
+    // For each merged stop, find the earliest nextArrival among all original stops in the group
+    const mergedData: (StopResponse & { nextArrival?: ArrivalResponse | null })[] = mergedStops.map(
+      (merged) => {
+        // Find all original stopIds that were merged into this stop
+        const groupStopIds = stops
+          .filter(
+            (s) =>
+              s.stopName === merged.stopName &&
+              Math.sqrt((s.lat - merged.lat) ** 2 + (s.lon - merged.lon) ** 2) < 0.002 &&
+              (s.routes ?? []).some((r) =>
+                (merged.routes ?? []).some((mr) => mr.routeId === r.routeId),
+              ),
+          )
+          .map((s) => s.stopId);
+        // Find the earliest nextArrival among the group
+        let bestArrival: ArrivalResponse | null = null;
+        for (const stopId of groupStopIds) {
+          const arr = nextArrivalByStopId.get(stopId) ?? null;
+          if (arr) {
+            const arrTime =
+              new Date(arr.realtimeArrival).getTime() / 1000 + (arr.realtimeDelaySeconds ?? 0);
+            const bestTime = bestArrival
+              ? new Date(bestArrival.realtimeArrival).getTime() / 1000 +
+                (bestArrival.realtimeDelaySeconds ?? 0)
+              : Infinity;
+            if (!bestArrival || arrTime < bestTime) {
+              bestArrival = arr;
+            }
+          }
+        }
+        return { ...merged, nextArrival: bestArrival };
+      },
+    );
 
     const result = {
-      data: mergeColocatedStops(data) as (StopResponse & {
-        nextArrival?: ArrivalResponse | null;
-      })[],
+      data: mergedData,
       searchCentre: { lat: params.lat, lon: params.lon },
       radiusMetres: radius,
     };

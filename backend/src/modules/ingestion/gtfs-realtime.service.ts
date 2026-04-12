@@ -214,7 +214,7 @@ export class GtfsRealtimeService {
       if (!tripId) continue;
 
       if (validTripIds.has(tripId)) {
-        // Scheduled trip — store per-stop arrivalTime and/or delay
+        // Scheduled trip — store per-stop arrivalTime and/or delay, using arrival->departure fallback
         const stopMap: Record<
           string,
           { arrivalTime?: number; delay?: number; realtimeArrival?: string }
@@ -222,8 +222,15 @@ export class GtfsRealtimeService {
         for (const stu of tu.stopTimeUpdate ?? []) {
           const sid = stu.stopId;
           if (!sid) continue;
-          const arrivalTime = stu.arrival?.time != null ? Number(stu.arrival.time) : undefined;
-          const delay = stu.arrival?.delay != null ? Number(stu.arrival.delay) : undefined;
+          // Fallback: use arrival first, then departure if missing
+          const rawTime = stu.arrival?.time ?? stu.departure?.time;
+          const arrivalTime = rawTime != null ? Number(rawTime) : undefined;
+          const delay =
+            stu.arrival?.delay != null
+              ? Number(stu.arrival.delay)
+              : stu.departure?.delay != null
+                ? Number(stu.departure.delay)
+                : undefined;
           if (arrivalTime !== undefined || delay !== undefined) {
             stopMap[sid] = {};
             if (arrivalTime !== undefined) {

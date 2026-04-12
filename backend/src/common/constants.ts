@@ -17,10 +17,10 @@ export const TRIP_UPDATE_CACHE_TTL_S = 20;
 
 // API response cache TTL for arrival lists (seconds) — short TTL keeps
 // countdown timers accurate while avoiding redundant DB queries
-export const API_CACHE_ARRIVALS_TTL_S = 20;
+export const API_CACHE_ARRIVALS_TTL_S = 15;
 // API response cache TTL for route lists (seconds) — routes change infrequently
 // so a longer TTL is safe and reduces load on the stop_times index
-export const API_CACHE_ROUTES_TTL_S = 86400; // 1 day
+export const API_CACHE_ROUTES_TTL_S = 3600; // 1 hour
 // API response cache TTL for nearby stop results (seconds) — slightly longer
 // than arrivals TTL; geo results are stable unless the user moves significantly
 export const API_CACHE_NEARBY_TTL_S = 45;
