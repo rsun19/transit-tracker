@@ -1,5 +1,7 @@
+import dynamic from 'next/dynamic';
 import { fetchStopArrivals, fetchAlerts } from '@/lib/api-client';
-import StopArrivalsClient from './StopArrivalsClient';
+
+const StopArrivalsClient = dynamic(() => import('./StopArrivalsClient'), { ssr: false });
 
 const DEFAULT_AGENCY = 'mbta';
 
