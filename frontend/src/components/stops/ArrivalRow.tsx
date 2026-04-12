@@ -20,6 +20,16 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
 
   // Use realtimeArrival directly (already computed by backend)
   const effectiveIso = arrival.realtimeArrival;
+  // Format as local time string (HH:MM)
+  let formattedTime = effectiveIso;
+  try {
+    formattedTime = new Date(effectiveIso).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch (e) {
+    // If parsing fails, fall back to the ISO string
+  }
 
   const timeColor = isLate
     ? 'error.main'
@@ -42,7 +52,7 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
       </TableCell>
       <TableCell>
         <Typography variant="body2" sx={{ color: timeColor }}>
-          {effectiveIso}
+          {formattedTime}
         </Typography>
       </TableCell>
       <TableCell>
