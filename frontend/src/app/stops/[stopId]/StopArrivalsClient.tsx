@@ -34,6 +34,9 @@ export default function StopArrivalsClient({
   const [alerts, setAlerts] = useState<Alert[]>(initialAlerts);
   const [error, setError] = useState<string | null>(null);
 
+  // Track current time so filtering is always up-to-date
+  const [now, setNow] = useState(Date.now());
+
   useEffect(() => {
     let isMounted = true;
     const fetchArrivals = async () => {
@@ -56,16 +59,30 @@ export default function StopArrivalsClient({
         }
       }
     };
-    const interval = setInterval(fetchArrivals, 15000);
+    // Unified 15s interval for both arrivals and now
+    const interval = setInterval(() => {
+      fetchArrivals();
+      setNow(Date.now());
+    }, 15000);
+    // Also update now immediately on mount
+    setNow(Date.now());
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [stopId]);
 
+  // Filter out arrivals that are already in the past (based on realtimeArrival)
+  const filteredArrivals = useMemo(() => {
+    return arrivals.filter((arr) => {
+      const arrTime = new Date(arr.realtimeArrival).getTime();
+      return arrTime >= now;
+    });
+  }, [arrivals, now]);
+
   const directionGroups = useMemo(() => {
     const groups = new Map<number | null, Arrival[]>();
-    for (const arr of arrivals) {
+    for (const arr of filteredArrivals) {
       const key = arr.directionId;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(arr);
@@ -77,7 +94,7 @@ export default function StopArrivalsClient({
       if (b === null) return -1;
       return b - a; // 1 before 0
     });
-  }, [arrivals]);
+  }, [filteredArrivals]);
 
   const isGrouped = directionGroups.length > 1;
   const displayName = stopName || stopId;
