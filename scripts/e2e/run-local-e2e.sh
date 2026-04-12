@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # Run local E2E workflow just like CI (dev server, Cypress, logs)
 # Usage: npm run test:e2e:local OR make e2e-local
