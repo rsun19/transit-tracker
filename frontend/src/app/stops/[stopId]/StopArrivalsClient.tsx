@@ -46,7 +46,13 @@ export default function StopArrivalsClient({
           fetchAlerts({ stopId, agencyKey: DEFAULT_AGENCY }),
         ]);
         if (!isMounted) return;
-        setArrivals(arrData.data);
+        // Sort arrivals by .realtimeArrival ascending before setting state
+        const sortedArrivals = [...arrData.data].sort((a, b) => {
+          const tA = new Date(a.realtimeArrival).getTime();
+          const tB = new Date(b.realtimeArrival).getTime();
+          return tA - tB;
+        });
+        setArrivals(sortedArrivals);
         setStopName(arrData.stopName || stopId);
         setAlerts(alertsData.alerts);
         setError(null);
