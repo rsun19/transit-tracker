@@ -303,7 +303,7 @@ export class StopsService {
        )
       SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time, stop_id
       FROM (
-        SELECT DISTINCT ON (t.trip_id, ts.d)
+        SELECT DISTINCT ON (t.trip_id, ss.stop_id, ts.d)
           ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
           t.direction_id,
           ((ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
@@ -313,7 +313,7 @@ export class StopsService {
         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
         JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
         WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= $6::timestamp
-        ORDER BY t.trip_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
+        ORDER BY t.trip_id, ss.stop_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
       ) deduped
       ORDER BY arrival_time ASC
       LIMIT $7`,
@@ -357,10 +357,22 @@ export class StopsService {
       }
     }
 
+    // Build a set of all colocated stop IDs for this station
+    const colocatedStopIdSet = new Set(effectiveStopIds);
+
     const data: ArrivalResponse[] = rows.map((row) => {
       const tripRealtime = realtimeMap.get(row.trip_id) ?? {};
-      // Only use realtime if the stop_id for this row is present in the realtime update
-      const stopRealtime = tripRealtime[row.stop_id] ?? null;
+      // Try to find realtime for this stop, or any colocated stop
+      let stopRealtime = tripRealtime[row.stop_id] ?? null;
+      if (!stopRealtime) {
+        // Try all colocated stop IDs
+        for (const altStopId of colocatedStopIdSet) {
+          if (altStopId !== row.stop_id && tripRealtime[altStopId]) {
+            stopRealtime = tripRealtime[altStopId];
+            break;
+          }
+        }
+      }
       let realtimeArrival: string = row.arrival_time; // fallback to scheduled
       let realtimeArrivalSeconds: number = new Date(row.arrival_time).getTime() / 1000;
       let realtimeDelay: number | null = null;
