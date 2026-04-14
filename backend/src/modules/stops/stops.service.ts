@@ -9,6 +9,7 @@ import {
   API_CACHE_ARRIVALS_TTL_S,
   API_CACHE_NEARBY_TTL_S,
   DEFAULT_SEARCH_LIMIT,
+  DEFAULT_STOP_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
@@ -180,7 +181,7 @@ export class StopsService {
   async getArrivals(
     stopId: string,
     agencyKey: string,
-    limit = DEFAULT_SEARCH_LIMIT,
+    limit = DEFAULT_STOP_SEARCH_LIMIT,
     after?: string,
   ): Promise<{ data: ArrivalResponse[]; stopId: string; agencyKey: string; stopName: string }> {
     const cacheKey = `cache:arrivals:v3:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;

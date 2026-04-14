@@ -32,3 +32,5 @@ export const REALTIME_POLL_INTERVAL_MS = 15_000;
 export const DEFAULT_SEARCH_LIMIT = 20;
 // Maximum page size a caller may request for stop search results
 export const MAX_SEARCH_LIMIT = 100;
+
+export const DEFAULT_STOP_SEARCH_LIMIT = 30;
