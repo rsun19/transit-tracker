@@ -83,14 +83,20 @@ Use the dev Compose overlay to mount source directories as volumes, so code chan
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
-| Service  | Dev URL                 | Hot reload                 |
-| -------- | ----------------------- | -------------------------- |
-| Frontend | `http://localhost:3001` | Yes — Next.js fast refresh |
-| Backend  | `http://localhost:3000` | Yes — NestJS watch mode    |
-| Postgres | `localhost:5432`        | N/A                        |
-| Redis    | `localhost:6379`        | N/A                        |
+| Service   | Internal port | Dev access              | Hot reload                  |
+| --------- | ------------- | ----------------------- | --------------------------- |
+| Frontend  | 3001          | `http://localhost:3001` | Yes — Next.js fast refresh  |
+| NGINX     | 80            | `http://localhost:3000` | N/A (config reload on save) |
+| agencies  | 3001          | via NGINX               | Yes — NestJS watch mode     |
+| routes    | 3002          | via NGINX               | Yes — NestJS watch mode     |
+| stops     | 3003          | via NGINX               | Yes — NestJS watch mode     |
+| alerts    | 3004          | via NGINX               | Yes — NestJS watch mode     |
+| vehicles  | 3005          | via NGINX               | Yes — NestJS watch mode     |
+| ingestion | —             | —                       | Yes — NestJS watch mode     |
+| Postgres  | 5432          | `localhost:5432`        | N/A                         |
+| Redis     | 6379          | `localhost:6379`        | N/A                         |
 
-The NGINX proxy on port 8080 is still available in dev mode and routes normally.
+The NGINX proxy on port 3000 proxies `/api/v1/*` to the correct microservice by path prefix.
 
 ---
 
@@ -99,14 +105,16 @@ The NGINX proxy on port 8080 is still available in dev mode and routes normally.
 All test commands run inside the containers against the live database and Redis (integration tests) or in isolation (unit tests).
 
 ```sh
-# Backend: all tests
-docker compose exec backend npm test
+# Microservice tests (run from service directory):
+docker compose exec agencies npm test
+docker compose exec routes npm test
+docker compose exec stops npm test
 
-# Backend: contract tests only
-docker compose exec backend npm run test:contract
+# Contract tests (check API schema conformance)
+docker compose exec routes npm run test:contract
 
-# Backend: coverage report (must be ≥ 80%)
-docker compose exec backend npm run test:cov
+# Coverage (must be ≥ 80%)
+docker compose exec stops npm run test:cov
 
 # Frontend: unit tests
 docker compose exec frontend npm test
@@ -234,16 +242,16 @@ Record command output snippets and blockers in `specs/002-test-automation-ci/res
 
    Leave the value blank or omit the variable if the feed is public.
 
-3. **Restart the worker** to pick up the new config:
+3. **Restart the ingestion service** to pick up the new config:
 
    ```sh
-   docker compose restart worker
+   docker compose restart ingestion
    ```
 
-   The worker ingests all listed agencies on the next scheduled cron run. To trigger immediately:
+   The ingestion service ingests all listed agencies on the next scheduled cron run. To trigger immediately, set the env var and restart:
 
    ```sh
-   docker compose exec worker node dist/worker.js --run-now
+   GTFS_INGEST_ON_STARTUP=true docker compose up -d ingestion
    ```
 
 No code changes and no image rebuild needed — the worker reads `agencies.json` at startup.
@@ -269,27 +277,24 @@ docker compose up --build
 
 ```
 transit-tracker/
+├── packages/
+│   └── shared/         Shared library (TypeORM entities, config schema, constants)
+├── services/
+│   ├── agencies/       Standalone NestJS — agency config API
+│   ├── routes/         Standalone NestJS — routes + trips + shapes API
+│   ├── stops/          Standalone NestJS — stops + arrivals + nearby API
+│   ├── alerts/         Standalone NestJS — service alerts API (Redis)
+│   ├── vehicles/       Standalone NestJS — live vehicle positions API (Redis)
+│   └── ingestion/      Standalone NestJS worker — GTFS static + realtime ingestion
 ├── frontend/           Next.js 14 app (pages, components, hooks, styles)
-├── backend/
-│   └── src/
-│       ├── agencies/   Agency REST module
-│       ├── routes/     Routes REST module
-│       ├── stops/      Stops + nearby + arrivals modules
-│       ├── trips/      Trips REST module
-│       ├── vehicles/   Live vehicles module
-│       ├── alerts/     Service alerts module
-│       ├── worker/     GTFS ingestion worker (cron + realtime)
-│       ├── database/   TypeORM entities and migration setup
-│       ├── redis/      Redis client module
-│       └── common/     Shared constants, guards, interceptors
+├── backend/            Legacy monolith (being migrated to services/)
 ├── config/
 │   └── agencies.json   Agency list (edit to add/remove agencies)
-├── docker/             Per-service Dockerfiles
-├── docs/               User-facing documentation (you are here)
-├── specs/              SpecKit feature specs (internal planning artifacts)
-├── nginx.conf          NGINX reverse proxy configuration
-├── docker-compose.yml  Production Compose file
-└── docker-compose.dev.yml  Dev overlay (volume mounts + port bindings)
+├── docs/               Documentation
+├── nginx.conf          Production NGINX config
+├── nginx.dev.conf      Dev NGINX config
+├── docker-compose.yml  Production Compose
+└── docker-compose.dev.yml  Dev Compose (volume mounts + port bindings)
 ```
 
 ---
@@ -307,12 +312,12 @@ transit-tracker/
 | Stop search returns empty (`data: []`)           | `parent_station_id` stored as `''`        | Query must use `IS NULL OR = ''`; a plain `IS NULL` misses blank CSV fields ingested as empty strings                          |
 | Route detail only shows one branch               | Arbitrary trip selected by `trip_id` sort | `findOne()` must use `DISTINCT ON (trip_headsign) ORDER BY trip_headsign, stop_count DESC` to pick the longest trip per branch |
 
-### Worker container picks up stale environment variables
+### Ingestion container picks up stale environment variables
 
-Docker bakes environment variables into the container image at creation time. `docker compose restart worker` does **not** re-read `.env`. After changing any `GTFS_*` variable you must recreate the container:
+Docker bakes environment variables into the container image at creation time. `docker compose restart ingestion` does **not** re-read `.env`. After changing any `GTFS_*` variable you must recreate the container:
 
 ```sh
-docker compose -f docker-compose.dev.yml up -d worker
+docker compose -f docker-compose.dev.yml up -d ingestion
 ```
 
 This is especially important for `GTFS_INGEST_ON_STARTUP` — if `true` is baked in and the worker runs in NestJS watch mode, every file-save will restart the process and trigger a fresh ingest, wiping `stop_times` mid-run.

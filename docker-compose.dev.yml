@@ -36,15 +36,41 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
+  agencies:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: services/agencies/Dockerfile
       target: development
     volumes:
-      - ./backend:/app/backend
-      - /app/backend/node_modules
+      - ./services/agencies:/app/services/agencies
+      - /app/services/agencies/node_modules
+      - ./packages/shared:/app/packages/shared
       - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      PORT: 3001
+    depends_on:
+      cache:
+        condition: service_healthy
+    command: npm run start:dev
+
+  routes:
+    build:
+      context: .
+      dockerfile: services/routes/Dockerfile
+      target: development
+    volumes:
+      - ./services/routes:/app/services/routes
+      - /app/services/routes/node_modules
+      - ./packages/shared:/app/packages/shared
+      - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
     env_file:
       - .env
     environment:
@@ -52,8 +78,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/transit_tracker
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
-    ports:
-      - '3000:3000'
+      PORT: 3002
     depends_on:
       db:
         condition: service_healthy
@@ -61,15 +86,93 @@ services:
         condition: service_healthy
     command: npm run start:dev
 
-  worker:
+  stops:
     build:
       context: .
-      dockerfile: backend/Dockerfile.worker
+      dockerfile: services/stops/Dockerfile
       target: development
     volumes:
-      - ./backend:/app/backend
-      - /app/backend/node_modules
+      - ./services/stops:/app/services/stops
+      - /app/services/stops/node_modules
+      - ./packages/shared:/app/packages/shared
       - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/transit_tracker
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      PORT: 3003
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    command: npm run start:dev
+
+  alerts:
+    build:
+      context: .
+      dockerfile: services/alerts/Dockerfile
+      target: development
+    volumes:
+      - ./services/alerts:/app/services/alerts
+      - /app/services/alerts/node_modules
+      - ./packages/shared:/app/packages/shared
+      - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      PORT: 3004
+    depends_on:
+      cache:
+        condition: service_healthy
+    command: npm run start:dev
+
+  vehicles:
+    build:
+      context: .
+      dockerfile: services/vehicles/Dockerfile
+      target: development
+    volumes:
+      - ./services/vehicles:/app/services/vehicles
+      - /app/services/vehicles/node_modules
+      - ./packages/shared:/app/packages/shared
+      - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      PORT: 3005
+    depends_on:
+      cache:
+        condition: service_healthy
+    command: npm run start:dev
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+      target: development
+    volumes:
+      - ./services/ingestion:/app/services/ingestion
+      - /app/services/ingestion/node_modules
+      - ./packages/shared:/app/packages/shared
+      - ./config:/app/config
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
     env_file:
       - .env
     environment:
@@ -82,7 +185,19 @@ services:
         condition: service_healthy
       cache:
         condition: service_healthy
-    command: npm run start:worker:dev
+    command: npm run start:dev
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - '3000:80'
+    healthcheck:
+      test: ['CMD', 'nginx', '-t']
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   frontend:
     build:
@@ -96,9 +211,11 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      BACKEND_URL: http://backend:3000
+      BACKEND_URL: http://nginx:80
     ports:
       - '3001:3001'
+    depends_on:
+      - nginx
     command: npm run dev
 
 volumes:
