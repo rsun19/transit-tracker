@@ -36,15 +36,36 @@ services:
       retries: 5
     restart: unless-stopped
 
-  backend:
-    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-backend:${IMAGE_TAG:-latest}
+  # ── Microservices ──────────────────────────────────────────────
+
+  agencies:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-agencies:${IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: services/agencies/Dockerfile
+    environment:
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      NODE_ENV: production
+      PORT: 3001
+    env_file:
+      - .env
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  routes:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-routes:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/routes/Dockerfile
     environment:
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
       NODE_ENV: production
+      PORT: 3002
     env_file:
       - .env
     depends_on:
@@ -53,17 +74,85 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
-      interval: 15s
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+      interval: 30s
       timeout: 5s
-      retries: 5
+      retries: 3
     restart: unless-stopped
 
-  worker:
-    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-worker:${IMAGE_TAG:-latest}
+  stops:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-stops:${IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: backend/Dockerfile.worker
+      dockerfile: services/stops/Dockerfile
+    environment:
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      NODE_ENV: production
+      PORT: 3003
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  alerts:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-alerts:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/alerts/Dockerfile
+    environment:
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      NODE_ENV: production
+      PORT: 3004
+    env_file:
+      - .env
+    depends_on:
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  vehicles:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-vehicles:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/vehicles/Dockerfile
+    environment:
+      REDIS_URL: redis://cache:6379
+      AGENCY_CONFIG_PATH: /app/config/agencies.json
+      NODE_ENV: production
+      PORT: 3005
+    env_file:
+      - .env
+    depends_on:
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  ingestion:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-ingestion:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
     environment:
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
@@ -85,16 +174,18 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # ── Frontend ───────────────────────────────────────────────────
+
   frontend:
     image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-frontend:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        BACKEND_URL: http://backend:3000
+        BACKEND_URL: http://nginx:80
     environment:
       NODE_ENV: production
-      BACKEND_URL: http://backend:3000
+      BACKEND_URL: http://nginx:80
       HOSTNAME: '0.0.0.0'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3001/api/health || exit 1']
@@ -102,6 +193,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  # ── Reverse Proxy ──────────────────────────────────────────────
 
   nginx:
     image: nginx:1.27-alpine
@@ -113,12 +206,20 @@ services:
       - '80:80'
       - '443:443'
     depends_on:
-      backend:
+      agencies:
+        condition: service_healthy
+      routes:
+        condition: service_healthy
+      stops:
+        condition: service_healthy
+      alerts:
+        condition: service_healthy
+      vehicles:
         condition: service_healthy
       frontend:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://backend:3000/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://agencies:3001/health || exit 1']
       interval: 15s
       timeout: 5s
       retries: 3

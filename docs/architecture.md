@@ -5,48 +5,56 @@
 Transit Tracker is a six-service Docker Compose application that ingests GTFS static and realtime feeds from one or more transit agencies and serves a unified web interface.
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │           NGINX :80                  │
-                    │  rate-limit 60 req/min per IP        │
-                    │  /api/* → backend:3000               │
-                    │  /*     → frontend:3001              │
-                    └────────────┬────────────┬────────────┘
-                                 │            │
-                    ┌────────────▼───┐  ┌─────▼──────────┐
-                    │  Backend API   │  │   Frontend      │
-                    │  NestJS :3000  │  │  Next.js :3001  │
-                    └────┬───────┬──┘  └────────────────┘
-                         │       │
-          ┌──────────────▼─┐  ┌──▼──────────────┐
-          │  PostgreSQL     │  │     Redis 7     │
-          │  PostGIS :5432  │  │      :6379      │
-          └─────────────────┘  └────────┬────────┘
-                                        │
-                    ┌───────────────────▼──────────────┐
-                    │         Ingestion Worker         │
-                    │   NestJS standalone process      │
-                    │  • @Cron → GTFS static ingest    │
-                    │  • @Interval(15s) → GTFS-RT poll │
-                    └──────────────────────────────────┘
+                        ┌─────────────────────┐
+                        │ NGINX :80/:443       │
+                        │ routes by path prefix│
+                        └──┬──┬──┬──┬──┬──┬───┘
+          ┌─────────────────┘  │  │  │  │  │
+          │    ┌───────────────┘  │  │  │  │
+          │    │    ┌─────────────┘  │  │  │
+          │    │    │    ┌───────────┘  │  │
+          │    │    │    │    ┌─────────┘  │
+          ▼    ▼    ▼    ▼    ▼            ▼
+      agencies routes stops alerts vehicles frontend
+       :3001   :3002 :3003 :3004  :3005   :3001
+
+        ┌─────┴─────────┐          ┌─┴──────────┐
+        │ PostgreSQL    │          │  Redis 7    │
+        │ PostGIS :5432 │          │   :6379     │
+        └───────────────┘          └─┬───────────┘
+                                     │
+                           ┌─────────▼───────────┐
+                           │    ingestion         │
+                           │  NestJS worker       │
+                           │  @Cron + @Interval   │
+                           └─────────────────────┘
 ```
 
 ---
 
 ## Services
 
-### NGINX (`:80`)
+### NGINX (`:80/:443`)
 
-Reverse proxy and rate limiter. All traffic enters here.
+Reverse proxy and rate limiter. All traffic enters here. Routes `/api/v1/*` by path prefix to the appropriate microservice:
 
-- Routes `/api/*` → `backend:3000`
-- Routes `/*` → `frontend:3001`
+| Path prefix        | Upstream        |
+| ------------------ | --------------- |
+| `/api/v1/stops`    | `stops:3003`    |
+| `/api/v1/routes`   | `routes:3002`   |
+| `/api/v1/trips`    | `routes:3002`   |
+| `/api/v1/alerts`   | `alerts:3004`   |
+| `/api/v1/vehicles` | `vehicles:3005` |
+| `/api/v1/agencies` | `agencies:3001` |
+| `/*`               | `frontend:3001` |
+
 - `limit_req_zone` enforces 60 req/min per IP with burst=10
 - 429 responses return JSON `{"error":"Rate limit exceeded","statusCode":429}` (not HTML)
 - Config: [`nginx.conf`](../nginx.conf)
 
 ### Frontend (`frontend:3001`)
 
-Next.js 14 App Router application. All pages are client components that fetch from `/api/v1` via the shared `api-client.ts`.
+Next.js 14 App Router application. All pages are client components that fetch from `/api/v1` via the shared `api-client.ts`. Server-side rendering uses `BACKEND_URL=http://nginx:80` for API proxy rewrites.
 
 | Route                 | Page                                             |
 | --------------------- | ------------------------------------------------ |
@@ -63,20 +71,18 @@ Key conventions:
 - MUI v6 named sub-path imports (`@mui/material/Button`) to stay within 150 KB initial chunk budget
 - `next/dynamic({ ssr: false })` for VehicleMap (Leaflet requires browser APIs)
 
-### Backend API (`backend:3000`)
+### Microservices
 
-NestJS 10 application. Serves the REST API at `/api/v1`. Modules:
+Each domain is a standalone NestJS 10 application in `services/<name>/`. All services share TypeORM entities via the `@transit-tracker/shared` package (`packages/shared/`).
 
-| Module           | Endpoints                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------- |
-| `RoutesModule`   | `GET /routes`, `GET /routes/:id`                                                      |
-| `StopsModule`    | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/arrivals`, `GET /stops/:id/routes` |
-| `TripsModule`    | `GET /trips/:id`                                                                      |
-| `VehiclesModule` | `GET /vehicles/live`                                                                  |
-| `AlertsModule`   | `GET /alerts`                                                                         |
-| `AgenciesModule` | `GET /agencies`                                                                       |
-| `HealthModule`   | `GET /health`                                                                         |
-| `CacheModule`    | Internal Redis wrapper (cache-aside)                                                  |
+| Service     | Port | Endpoints                                                                             | Data source        | Depends on |
+| ----------- | ---- | ------------------------------------------------------------------------------------- | ------------------ | ---------- |
+| `agencies`  | 3001 | `GET /agencies`                                                                       | config file        | —          |
+| `routes`    | 3002 | `GET /routes`, `GET /routes/:id`, `GET /routes/:id/shape`, `GET /trips/:id`           | PostgreSQL         | db, cache  |
+| `stops`     | 3003 | `GET /stops`, `GET /stops/nearby`, `GET /stops/:id/arrivals`, `GET /stops/:id/routes` | PostgreSQL         | db, cache  |
+| `alerts`    | 3004 | `GET /alerts`                                                                         | Redis              | cache      |
+| `vehicles`  | 3005 | `GET /vehicles/live`                                                                  | Redis              | cache      |
+| `ingestion` | —    | Worker process (no HTTP) — `@Cron` + `@Interval(15s)`                                 | PostgreSQL + Redis | db, cache  |
 
 #### Branching route detection (`GET /routes/:id`)
 

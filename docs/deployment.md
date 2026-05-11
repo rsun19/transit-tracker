@@ -14,9 +14,13 @@ GitHub Actions CI
 
 Hetzner VPS (Ubuntu 24.04)
   ├── nginx:1.27-alpine       → port 80 (ACME) + 443 (TLS proxy)
-  ├── backend (NestJS)        → :3000 (internal)
+  ├── agencies (NestJS)       → :3001 (internal, no DB)
+  ├── routes (NestJS)         → :3002 (internal, DB)
+  ├── stops (NestJS)          → :3003 (internal, DB)
+  ├── alerts (NestJS)         → :3004 (internal, Redis only)
+  ├── vehicles (NestJS)       → :3005 (internal, Redis only)
+  ├── ingestion (NestJS)      → (no port, DB + Redis)
   ├── frontend (Next.js)      → :3001 (internal)
-  ├── worker (NestJS)         → (no port)
   ├── db (PostGIS 16)         → :5432 (internal)
   ├── cache (Redis 7)         → :6379 (internal)
   └── certbot                 → renews cert every 12h
@@ -146,10 +150,10 @@ docker logs transit-tracker-nginx-1 --tail 20
 
 **`cannot load certificate ... No such file or directory`** — cert not yet issued. Run the manual certbot bootstrap above.
 
-### backend or frontend unhealthy
+### microservice or frontend unhealthy
 
 ```bash
-docker inspect transit-tracker-backend-1 --format '{{json .State.Health.Log}}' | python3 -m json.tool
+docker inspect transit-tracker-routes-1 --format '{{json .State.Health.Log}}' | python3 -m json.tool
 ```
 
 Check the `Output` field of each log entry for the failure reason.
