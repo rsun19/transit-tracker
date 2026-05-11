@@ -23,6 +23,9 @@ WORKDIR /app/services/routes
 COPY --from=builder /app/services/routes/dist ./dist
 COPY --from=builder /app/services/routes/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
+RUN rm -rf node_modules/@transit-tracker/shared && mkdir -p node_modules/@transit-tracker/shared
+COPY --from=builder /app/packages/shared/dist node_modules/@transit-tracker/shared/dist
+COPY --from=builder /app/packages/shared/package.json node_modules/@transit-tracker/shared/package.json
 COPY config/ /app/config/
 
 EXPOSE 3002
