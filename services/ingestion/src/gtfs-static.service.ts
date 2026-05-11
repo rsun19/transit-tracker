@@ -222,32 +222,66 @@ export class GtfsStaticService {
   }
 
   private async batchInsertRoutes(agencyId: string, routes: GtfsRoute[]): Promise<void> {
-    // Simplified — see monolith for full implementation
-    const values = routes
-      .map(
-        (r) =>
-          `('${agencyId}', '${r.route_id.replace(/'/g, "''")}', '${(r.route_short_name || '').replace(/'/g, "''")}', '${(r.route_long_name || '').replace(/'/g, "''")}', ${parseInt(r.route_type) || 0}, '${(r.route_color || '').replace(/'/g, "''")}', '${(r.route_text_color || '').replace(/'/g, "''")}')`,
-      )
-      .join(',');
-    if (values.length === 0) return;
-    await this.dataSource.query(
-      `INSERT INTO routes (agency_id, route_id, short_name, long_name, route_type, color, text_color) VALUES ${values}
-       ON CONFLICT (agency_id, route_id) DO UPDATE SET short_name = EXCLUDED.short_name, long_name = EXCLUDED.long_name, route_type = EXCLUDED.route_type, color = EXCLUDED.color, text_color = EXCLUDED.text_color`,
-    );
+    const cols = 7;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < routes.length; i += chunkSize) {
+      const chunk = routes.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const r of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, $${n + 5}, $${n + 6})`,
+        );
+        params.push(
+          agencyId,
+          r.route_id,
+          r.route_short_name || null,
+          r.route_long_name || null,
+          parseInt(r.route_type) || 0,
+          r.route_color || null,
+          r.route_text_color || null,
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO routes (agency_id, route_id, short_name, long_name, route_type, color, text_color) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (agency_id, route_id) DO UPDATE SET short_name = EXCLUDED.short_name, long_name = EXCLUDED.long_name, route_type = EXCLUDED.route_type, color = EXCLUDED.color, text_color = EXCLUDED.text_color`,
+        params,
+      );
+    }
   }
 
   private async batchInsertTrips(agencyId: string, trips: GtfsTrip[]): Promise<void> {
-    const values = trips
-      .map(
-        (t) =>
-          `('${agencyId}', '${t.trip_id.replace(/'/g, "''")}', '${t.route_id.replace(/'/g, "''")}', '${(t.service_id || '').replace(/'/g, "''")}', ${t.trip_headsign ? `'${t.trip_headsign.replace(/'/g, "''")}'` : 'NULL'}, ${t.direction_id ? parseInt(t.direction_id) : 'NULL'}, ${t.shape_id ? `'${t.shape_id.replace(/'/g, "''")}'` : 'NULL'}, ${t.wheelchair_accessible ? parseInt(t.wheelchair_accessible) : 'NULL'})`,
-      )
-      .join(',');
-    if (values.length === 0) return;
-    await this.dataSource.query(
-      `INSERT INTO trips (agency_id, trip_id, route_id, service_id, trip_headsign, direction_id, shape_id, wheelchair_accessible) VALUES ${values}
-       ON CONFLICT (agency_id, trip_id) DO UPDATE SET route_id = EXCLUDED.route_id, service_id = EXCLUDED.service_id, trip_headsign = EXCLUDED.trip_headsign, direction_id = EXCLUDED.direction_id, shape_id = EXCLUDED.shape_id, wheelchair_accessible = EXCLUDED.wheelchair_accessible`,
-    );
+    const cols = 8;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < trips.length; i += chunkSize) {
+      const chunk = trips.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const t of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, $${n + 5}, $${n + 6}, $${n + 7})`,
+        );
+        params.push(
+          agencyId,
+          t.trip_id,
+          t.route_id,
+          t.service_id || null,
+          t.trip_headsign || null,
+          t.direction_id ? parseInt(t.direction_id) : null,
+          t.shape_id || null,
+          t.wheelchair_accessible ? parseInt(t.wheelchair_accessible) : null,
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO trips (agency_id, trip_id, route_id, service_id, trip_headsign, direction_id, shape_id, wheelchair_accessible) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (agency_id, trip_id) DO UPDATE SET route_id = EXCLUDED.route_id, service_id = EXCLUDED.service_id, trip_headsign = EXCLUDED.trip_headsign, direction_id = EXCLUDED.direction_id, shape_id = EXCLUDED.shape_id, wheelchair_accessible = EXCLUDED.wheelchair_accessible`,
+        params,
+      );
+    }
   }
 
   private async batchInsertStops(agencyId: string, stops: GtfsStop[]): Promise<void> {
@@ -257,49 +291,182 @@ export class GtfsStaticService {
       return !isNaN(lat) && !isNaN(lon) && isFinite(lat) && isFinite(lon);
     });
     if (valid.length === 0) return;
-    const values = valid
-      .map((s) => {
+    const cols = 9;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < valid.length; i += chunkSize) {
+      const chunk = valid.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const s of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, ST_SetSRID(ST_MakePoint($${n + 4}, $${n + 5}), 4326), $${n + 6}, $${n + 7}, $${n + 8})`,
+        );
         const lat = parseFloat(s.stop_lat);
         const lon = parseFloat(s.stop_lon);
-        return `('${agencyId}', '${s.stop_id.replace(/'/g, "''")}', '${(s.stop_name || '').replace(/'/g, "''")}', ${s.stop_code ? `'${s.stop_code.replace(/'/g, "''")}'` : 'NULL'}, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326), ${s.parent_station ? `'${s.parent_station.replace(/'/g, "''")}'` : 'NULL'}, ${s.wheelchair_boarding ? parseInt(s.wheelchair_boarding) : 'NULL'})`;
-      })
-      .join(',');
-    if (values.length === 0) return;
-    await this.dataSource.query(
-      `INSERT INTO stops (agency_id, stop_id, stop_name, stop_code, location, parent_station_id, wheelchair_boarding) VALUES ${values}
-       ON CONFLICT (agency_id, stop_id) DO UPDATE SET stop_name = EXCLUDED.stop_name, stop_code = EXCLUDED.stop_code, location = EXCLUDED.location, parent_station_id = EXCLUDED.parent_station_id, wheelchair_boarding = EXCLUDED.wheelchair_boarding`,
-    );
+        params.push(
+          agencyId,
+          s.stop_id,
+          s.stop_name || null,
+          s.stop_code || null,
+          lon,
+          lat,
+          s.parent_station || null,
+          s.wheelchair_boarding ? parseInt(s.wheelchair_boarding) : null,
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO stops (agency_id, stop_id, stop_name, stop_code, location, parent_station_id, wheelchair_boarding) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (agency_id, stop_id) DO UPDATE SET stop_name = EXCLUDED.stop_name, stop_code = EXCLUDED.stop_code, location = EXCLUDED.location, parent_station_id = EXCLUDED.parent_station_id, wheelchair_boarding = EXCLUDED.wheelchair_boarding`,
+        params,
+      );
+    }
   }
 
   private async batchInsertCalendars(agencyId: string, calendars: GtfsCalendar[]): Promise<void> {
-    const values = calendars
-      .map((c) => {
+    const cols = 11;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < calendars.length; i += chunkSize) {
+      const chunk = calendars.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const c of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, $${n + 5}, $${n + 6}, $${n + 7}, $${n + 8}, $${n + 9}, $${n + 10})`,
+        );
         const bool = (v: string) => v === '1';
-        return `('${agencyId}', '${c.service_id.replace(/'/g, "''")}', ${bool(c.monday)}, ${bool(c.tuesday)}, ${bool(c.wednesday)}, ${bool(c.thursday)}, ${bool(c.friday)}, ${bool(c.saturday)}, ${bool(c.sunday)}, '${c.start_date}', '${c.end_date}')`;
-      })
-      .join(',');
-    if (values.length === 0) return;
-    await this.dataSource.query(
-      `INSERT INTO service_calendars (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date) VALUES ${values}
-       ON CONFLICT (agency_id, service_id) DO UPDATE SET monday = EXCLUDED.monday, tuesday = EXCLUDED.tuesday, wednesday = EXCLUDED.wednesday, thursday = EXCLUDED.thursday, friday = EXCLUDED.friday, saturday = EXCLUDED.saturday, sunday = EXCLUDED.sunday, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
-    );
+        params.push(
+          agencyId,
+          c.service_id,
+          bool(c.monday),
+          bool(c.tuesday),
+          bool(c.wednesday),
+          bool(c.thursday),
+          bool(c.friday),
+          bool(c.saturday),
+          bool(c.sunday),
+          c.start_date,
+          c.end_date,
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO service_calendars (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (agency_id, service_id) DO UPDATE SET monday = EXCLUDED.monday, tuesday = EXCLUDED.tuesday, wednesday = EXCLUDED.wednesday, thursday = EXCLUDED.thursday, friday = EXCLUDED.friday, saturday = EXCLUDED.saturday, sunday = EXCLUDED.sunday, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
+        params,
+      );
+    }
   }
 
   private async copyStopTimes(tempDir: string, agencyId: string): Promise<void> {
     const filePath = path.join(tempDir, 'stop_times.txt');
     if (!fs.existsSync(filePath)) return;
-    // Full implementation uses shadow table swap with COPY — simplified here
     this.logger.log(`Importing stop_times for agency ${agencyId}`);
-    await this.dataSource.query(
-      `CREATE UNLOGGED TABLE stop_times_new (LIKE stop_times INCLUDING ALL)`,
-    );
-    // In production, use pg-copy-streams for the actual COPY
-    await this.dataSource.query(`DROP TABLE stop_times_new`);
+
+    interface GtfsStopTimeRow {
+      trip_id: string;
+      stop_id: string;
+      stop_sequence: string;
+      arrival_time: string;
+      departure_time: string;
+      stop_headsign: string;
+      pickup_type: string;
+      drop_off_type: string;
+    }
+
+    const rows: GtfsStopTimeRow[] = await new Promise((resolve, reject) => {
+      const acc: GtfsStopTimeRow[] = [];
+      createReadStream(filePath)
+        .pipe(csvParser())
+        .on('data', (r: GtfsStopTimeRow) => acc.push(r))
+        .on('end', () => resolve(acc))
+        .on('error', reject);
+    });
+
+    const cols = 9;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const r of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, $${n + 5}, $${n + 6}, $${n + 7}, $${n + 8})`,
+        );
+        params.push(
+          agencyId,
+          r.trip_id,
+          r.stop_id,
+          parseInt(r.stop_sequence),
+          r.arrival_time || null,
+          r.departure_time || null,
+          r.stop_headsign || null,
+          r.pickup_type ? parseInt(r.pickup_type) : null,
+          r.drop_off_type ? parseInt(r.drop_off_type) : null,
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO stop_times (agency_id, trip_id, stop_id, stop_sequence, arrival_time, departure_time, stop_headsign, pickup_type, drop_off_type) VALUES ${placeholders.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        params,
+      );
+    }
+    this.logger.log(`Imported ${rows.length} stop_times rows for agency ${agencyId}`);
   }
 
   private async copyShapes(tempDir: string, agencyId: string): Promise<void> {
     const filePath = path.join(tempDir, 'shapes.txt');
     if (!fs.existsSync(filePath)) return;
     this.logger.log(`Importing shapes for agency ${agencyId}`);
+
+    interface GtfsShapeRow {
+      shape_id: string;
+      shape_pt_sequence: string;
+      shape_pt_lat: string;
+      shape_pt_lon: string;
+    }
+
+    const rows: GtfsShapeRow[] = await new Promise((resolve, reject) => {
+      const acc: GtfsShapeRow[] = [];
+      createReadStream(filePath)
+        .pipe(csvParser())
+        .on('data', (r: GtfsShapeRow) => acc.push(r))
+        .on('end', () => resolve(acc))
+        .on('error', reject);
+    });
+
+    const valid = rows.filter((r) => {
+      const lat = parseFloat(r.shape_pt_lat);
+      const lon = parseFloat(r.shape_pt_lon);
+      return !isNaN(lat) && !isNaN(lon) && isFinite(lat) && isFinite(lon);
+    });
+
+    const cols = 4;
+    const maxParams = 65535;
+    const chunkSize = Math.floor(maxParams / cols);
+    for (let i = 0; i < valid.length; i += chunkSize) {
+      const chunk = valid.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const r of chunk) {
+        const n = params.length + 1;
+        placeholders.push(
+          `($${n}, $${n + 1}, $${n + 2}, ST_SetSRID(ST_MakePoint($${n + 3}, $${n + 4}), 4326))`,
+        );
+        const lat = parseFloat(r.shape_pt_lat);
+        const lon = parseFloat(r.shape_pt_lon);
+        params.push(agencyId, r.shape_id, parseInt(r.shape_pt_sequence), lon, lat);
+      }
+      await this.dataSource.query(
+        `INSERT INTO shapes (agency_id, shape_id, pt_sequence, location) VALUES ${placeholders.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        params,
+      );
+    }
+    this.logger.log(`Imported ${valid.length} shape points for agency ${agencyId}`);
   }
 }

@@ -21,7 +21,7 @@ import { HealthController } from './health.controller';
             .join('\n');
           throw new Error(`Configuration validation failed:\n${messages}`);
         }
-        return config;
+        return result.data;
       },
     }),
     TypeOrmModule.forRootAsync({
