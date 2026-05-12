@@ -9,3 +9,6 @@ export const API_CACHE_NEARBY_TTL_S = 45;
 export const REALTIME_POLL_INTERVAL_MS = 15_000;
 export const DEFAULT_SEARCH_LIMIT = 20;
 export const MAX_SEARCH_LIMIT = 100;
+
+// Radius in degrees used to consider two bus stops as co-located (~150 m)
+export const STOP_MERGE_RADIUS_DEG = 150 / 111_320;

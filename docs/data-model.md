@@ -32,33 +32,35 @@ One row per configured transit provider.
 
 ### `routes`
 
-| Column       | Type           | Constraints                                           |
-| ------------ | -------------- | ----------------------------------------------------- |
-| `id`         | `UUID`         | `PRIMARY KEY`                                         |
-| `agency_id`  | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE`      |
-| `route_id`   | `VARCHAR(100)` | `NOT NULL` — from GTFS feed                           |
-| `short_name` | `VARCHAR(50)`  | nullable                                              |
-| `long_name`  | `TEXT`         | nullable                                              |
-| `route_type` | `SMALLINT`     | `NOT NULL` — 0=tram, 1=subway, 2=rail, 3=bus, 4=ferry |
-| `color`      | `VARCHAR(6)`   | nullable — hex without `#`                            |
-| `text_color` | `VARCHAR(6)`   | nullable                                              |
-| `created_at` | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                       |
+| Column           | Type           | Constraints                                                                                                     |
+| ---------------- | -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `id`             | `UUID`         | `PRIMARY KEY`                                                                                                   |
+| `agency_id`      | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE`                                                                |
+| `route_id`       | `VARCHAR(100)` | `NOT NULL` — from GTFS feed                                                                                     |
+| `short_name`     | `VARCHAR(50)`  | nullable                                                                                                        |
+| `long_name`      | `TEXT`         | nullable                                                                                                        |
+| `route_type`     | `SMALLINT`     | `NOT NULL` — 0=tram, 1=subway, 2=rail, 3=bus, 4=ferry                                                           |
+| `color`          | `VARCHAR(6)`   | nullable — hex without `#`                                                                                      |
+| `text_color`     | `VARCHAR(6)`   | nullable                                                                                                        |
+| `has_stop_times` | `BOOLEAN`      | `NOT NULL DEFAULT false` — precomputed; set to true if at least one stop_time exists for any trip on this route |
+| `created_at`     | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                                                                                 |
 
 **Indexes**: `UNIQUE (agency_id, route_id)` · `INDEX (agency_id, route_type)`
 
 ### `stops`
 
-| Column                | Type                    | Constraints                                      |
-| --------------------- | ----------------------- | ------------------------------------------------ |
-| `id`                  | `UUID`                  | `PRIMARY KEY`                                    |
-| `agency_id`           | `UUID`                  | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
-| `stop_id`             | `VARCHAR(100)`          | `NOT NULL` — from GTFS feed                      |
-| `stop_name`           | `TEXT`                  | `NOT NULL`                                       |
-| `stop_code`           | `VARCHAR(50)`           | nullable                                         |
-| `location`            | `GEOMETRY(Point, 4326)` | `NOT NULL` — WGS84 lat/lon                       |
-| `parent_station_id`   | `VARCHAR(100)`          | nullable                                         |
-| `wheelchair_boarding` | `SMALLINT`              | 0=unknown, 1=accessible, 2=inaccessible          |
-| `created_at`          | `TIMESTAMPTZ`           | `DEFAULT NOW()`                                  |
+| Column                | Type                    | Constraints                                                                                                                                                 |
+| --------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                  | `UUID`                  | `PRIMARY KEY`                                                                                                                                               |
+| `agency_id`           | `UUID`                  | `NOT NULL REFERENCES agencies ON DELETE CASCADE`                                                                                                            |
+| `stop_id`             | `VARCHAR(100)`          | `NOT NULL` — from GTFS feed                                                                                                                                 |
+| `stop_name`           | `TEXT`                  | `NOT NULL`                                                                                                                                                  |
+| `stop_code`           | `VARCHAR(50)`           | nullable                                                                                                                                                    |
+| `location`            | `GEOMETRY(Point, 4326)` | `NOT NULL` — WGS84 lat/lon                                                                                                                                  |
+| `parent_station_id`   | `VARCHAR(100)`          | nullable                                                                                                                                                    |
+| `wheelchair_boarding` | `SMALLINT`              | 0=unknown, 1=accessible, 2=inaccessible                                                                                                                     |
+| `colocated_group_id`  | `VARCHAR(100)`          | nullable — precomputed; the `stop_id` of the canonical stop in the co-located group (same name, within 150m, shares a route). Standalone stops have `NULL`. |
+| `created_at`          | `TIMESTAMPTZ`           | `DEFAULT NOW()`                                                                                                                                             |
 
 **Indexes**: `UNIQUE (agency_id, stop_id)` · `GiST INDEX (location)` — required for PostGIS spatial queries · `INDEX (agency_id, stop_code)`
 
@@ -135,6 +137,63 @@ Service pattern schedule — which days of the week a service runs.
 
 Ingestion also parses `calendar_dates.txt` to apply service exceptions (added/removed service days) updating these rows.
 
+### `route_stops` (precomputed — populated during ingestion)
+
+Maps every stop to the routes that serve it, with parent stations pre-expanded to include their children's routes. Eliminates the 4-table `stop_times → trips → routes → agencies` join at query time.
+
+| Column       | Type           | Constraints                                          |
+| ------------ | -------------- | ---------------------------------------------------- |
+| `id`         | `UUID`         | `PRIMARY KEY`                                        |
+| `agency_id`  | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE`     |
+| `stop_id`    | `VARCHAR(100)` | `NOT NULL` — may be a parent station or a child stop |
+| `route_id`   | `VARCHAR(100)` | `NOT NULL`                                           |
+| `short_name` | `VARCHAR(50)`  | denormalized from routes                             |
+| `long_name`  | `TEXT`         | denormalized from routes                             |
+| `route_type` | `SMALLINT`     | denormalized from routes                             |
+
+**Indexes**: `INDEX (agency_id, stop_id)`
+
+Populated by:
+
+```sql
+INSERT INTO route_stops (agency_id, stop_id, route_id, ...)
+SELECT DISTINCT st.agency_id, st.stop_id, ...
+FROM stop_times st JOIN trips t ... JOIN routes r ...
+UNION
+SELECT DISTINCT st.agency_id, s.parent_station_id, ...
+FROM stop_times st JOIN stops s ... JOIN trips t ... JOIN routes r ...
+WHERE s.parent_station_id IS NOT NULL AND s.parent_station_id != ''
+```
+
+### `route_branches` (precomputed — populated during ingestion)
+
+One row per `(route_id, direction_id, trip_headsign)` combination, containing the representative trip with the most stops. Eliminates the `trip_stop_counts` CTE at query time.
+
+| Column          | Type           | Constraints                                      |
+| --------------- | -------------- | ------------------------------------------------ |
+| `id`            | `UUID`         | `PRIMARY KEY`                                    |
+| `agency_id`     | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `route_id`      | `VARCHAR(100)` | `NOT NULL`                                       |
+| `direction_id`  | `SMALLINT`     | nullable                                         |
+| `trip_headsign` | `TEXT`         | nullable                                         |
+| `trip_id`       | `VARCHAR(100)` | `NOT NULL` — the representative trip ID          |
+| `shape_id`      | `VARCHAR(100)` | nullable — from the representative trip          |
+| `stop_count`    | `INTEGER`      | `NOT NULL` — number of stops on this trip        |
+
+**Indexes**: `INDEX (agency_id, route_id)`
+
+Populated by:
+
+```sql
+INSERT INTO route_branches (agency_id, route_id, direction_id, trip_headsign, trip_id, shape_id, stop_count)
+SELECT DISTINCT ON (t.route_id, t.direction_id, t.trip_headsign)
+  t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id,
+  COUNT(st.stop_id)::int AS stop_count
+FROM trips t JOIN stop_times st ...
+GROUP BY ...
+ORDER BY t.route_id, t.direction_id, t.trip_headsign, stop_count DESC
+```
+
 ---
 
 ## Entity Relationships
@@ -144,6 +203,10 @@ agencies ──< routes ──< trips ──< stop_times >── stops
 agencies ──< stops
 agencies ──< shapes
 agencies ──< service_calendars
+
+--- Precomputed (populated during ingestion) ---
+route_stops (stop_id → route_id, with parent expansion)
+route_branches (route_id → representative trip per direction/headsign)
 ```
 
 All foreign key relationships cascade `ON DELETE CASCADE` from `agencies`, so dropping an agency row removes all its GTFS data atomically.

@@ -14,7 +14,6 @@ import {
 } from '@transit-tracker/shared';
 import { CacheService } from './cache/cache.service';
 import { reconcileAddedTrips } from './reconcileAddedTrips';
-import { mergeColocatedStops } from './mergeColocatedStops';
 import {
   StopRouteRef,
   StopResponse,
@@ -64,13 +63,15 @@ export class StopsService {
         lon: string;
         total_count: string;
         agency_id: string;
+        colocated_group_id: string | null;
       }>
     >(
       `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
               ST_Y(s.location::geometry) AS lat,
               ST_X(s.location::geometry) AS lon,
               COUNT(*) OVER() AS total_count,
-              s.agency_id
+              s.agency_id,
+              s.colocated_group_id
        FROM stops s
        WHERE (s.stop_name ILIKE $1 OR s.stop_code ILIKE $1)
          AND (s.parent_station_id IS NULL OR s.parent_station_id = '')
@@ -93,24 +94,14 @@ export class StopsService {
           routeType: number;
         }>
       >(
-        `WITH expanded_stops AS MATERIALIZED (
-           SELECT stop_id AS query_stop_id, stop_id AS effective_stop_id
-           FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
-           UNION ALL
-           SELECT parent_station_id AS query_stop_id, stop_id AS effective_stop_id
-           FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
-         )
-         SELECT DISTINCT
-                es.query_stop_id       AS group_stop_id,
-                r2.route_id            AS "routeId",
-                r2.short_name          AS "shortName",
-                r2.long_name           AS "longName",
-                r2.route_type          AS "routeType"
-         FROM expanded_stops es
-         JOIN stop_times st2 ON st2.stop_id = es.effective_stop_id AND st2.agency_id = $2
-         JOIN trips t2  ON t2.trip_id  = st2.trip_id  AND t2.agency_id  = st2.agency_id
-         JOIN routes r2 ON r2.route_id = t2.route_id  AND r2.agency_id  = t2.agency_id
-         ORDER BY group_stop_id, r2.short_name ASC`,
+        `SELECT rs.stop_id AS group_stop_id,
+                rs.route_id AS "routeId",
+                rs.short_name AS "shortName",
+                rs.long_name AS "longName",
+                rs.route_type AS "routeType"
+         FROM route_stops rs
+         WHERE rs.stop_id = ANY($1) AND rs.agency_id = $2
+         ORDER BY rs.stop_id, rs.short_name ASC`,
         [stopIdList, agencyId],
       );
       for (const row of routeRows) {
@@ -135,7 +126,30 @@ export class StopsService {
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
-    const data = mergeColocatedStops(rawData);
+    // Merge co-located stops using precomputed colocated_group_id
+    const groupMap = new Map<string, StopResponse[]>();
+    for (let i = 0; i < rawData.length; i++) {
+      const gid = stopRows[i].colocated_group_id ?? rawData[i].stopId;
+      if (!groupMap.has(gid)) groupMap.set(gid, []);
+      groupMap.get(gid)!.push(rawData[i]);
+    }
+    const data: StopResponse[] = [];
+    for (const [, group] of groupMap) {
+      const merged = { ...group[0] };
+      const seenRoutes = new Set<string>();
+      const allRoutes: StopRouteRef[] = [];
+      for (const s of group) {
+        for (const r of s.routes ?? []) {
+          if (!seenRoutes.has(r.routeId)) {
+            seenRoutes.add(r.routeId);
+            allRoutes.push(r);
+          }
+        }
+      }
+      allRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
+      merged.routes = allRoutes;
+      data.push(merged);
+    }
 
     const searchResultPriority = (routes: StopRouteRef[] | undefined): number => {
       if (!routes) return 4;
@@ -443,13 +457,11 @@ export class StopsService {
         route_type: number;
       }>
     >(
-      `SELECT DISTINCT r.route_id, r.short_name, r.long_name, r.route_type
-       FROM stop_times st
-       JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
-       JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
-       JOIN agencies a ON a."agencyId" = st.agency_id
-       WHERE st.stop_id = $1 AND a.agency_key = $2
-       ORDER BY r.short_name ASC`,
+      `SELECT rs.route_id, rs.short_name, rs.long_name, rs.route_type
+       FROM route_stops rs
+       JOIN agencies a ON a."agencyId" = rs.agency_id
+       WHERE rs.stop_id = $1 AND a.agency_key = $2
+       ORDER BY rs.short_name ASC`,
       [stopId, agencyKey],
     );
 
@@ -512,13 +524,15 @@ export class StopsService {
         lon: number;
         distance_metres: number;
         agency_id: string;
+        colocated_group_id: string | null;
       }>
     >(
       `SELECT s.id, s.stop_id, s.stop_name, s.stop_code, s.wheelchair_boarding,
               ST_Y(s.location::geometry) AS lat,
               ST_X(s.location::geometry) AS lon,
               ST_Distance(s.location::geography, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) AS distance_metres,
-              s.agency_id
+              s.agency_id,
+              s.colocated_group_id
        FROM stops s
        WHERE ST_DWithin(s.location::geography, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography, $3)
          ${agencyFilter}
@@ -540,21 +554,14 @@ export class StopsService {
           routeType: number;
         }>
       >(
-        `WITH expanded_stops AS MATERIALIZED (
-           SELECT stop_id AS query_stop_id, stop_id AS effective_stop_id
-           FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
-           UNION ALL
-           SELECT parent_station_id AS query_stop_id, stop_id AS effective_stop_id
-           FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
-         )
-         SELECT DISTINCT es.query_stop_id AS group_stop_id,
-                r2.route_id AS "routeId", r2.short_name AS "shortName",
-                r2.long_name AS "longName", r2.route_type AS "routeType"
-         FROM expanded_stops es
-         JOIN stop_times st2 ON st2.stop_id = es.effective_stop_id AND st2.agency_id = $2
-         JOIN trips t2  ON t2.trip_id  = st2.trip_id  AND t2.agency_id  = st2.agency_id
-         JOIN routes r2 ON r2.route_id = t2.route_id  AND r2.agency_id  = t2.agency_id
-         ORDER BY group_stop_id, r2.short_name ASC`,
+        `SELECT rs.stop_id AS group_stop_id,
+                rs.route_id AS "routeId",
+                rs.short_name AS "shortName",
+                rs.long_name AS "longName",
+                rs.route_type AS "routeType"
+         FROM route_stops rs
+         WHERE rs.stop_id = ANY($1) AND rs.agency_id = $2
+         ORDER BY rs.stop_id, rs.short_name ASC`,
         [stopIdList, batchAgencyId],
       );
       for (const row of routeRows) {
@@ -589,36 +596,45 @@ export class StopsService {
       routes: routesByStopId.get(row.stop_id) ?? [],
     }));
 
-    const mergedStops = mergeColocatedStops(stops);
+    // Merge co-located stops using precomputed colocated_group_id
+    const groupMap = new Map<string, StopResponse[]>();
+    for (const s of stops) {
+      const gid = rows.find((r) => r.stop_id === s.stopId)?.colocated_group_id ?? s.stopId;
+      if (!groupMap.has(gid)) groupMap.set(gid, []);
+      groupMap.get(gid)!.push(s);
+    }
 
-    const mergedData: (StopResponse & { nextArrival?: ArrivalResponse | null })[] = mergedStops.map(
-      (merged) => {
-        const groupStopIds = stops
-          .filter(
-            (s) =>
-              s.stopName === merged.stopName &&
-              Math.sqrt((s.lat - merged.lat) ** 2 + (s.lon - merged.lon) ** 2) < 0.002 &&
-              (s.routes ?? []).some((r) =>
-                (merged.routes ?? []).some((mr) => mr.routeId === r.routeId),
-              ),
-          )
-          .map((s) => s.stopId);
-        let bestArrival: ArrivalResponse | null = null;
-        for (const stopId of groupStopIds) {
-          const arr = nextArrivalByStopId.get(stopId) ?? null;
-          if (arr) {
-            const arrTime =
-              new Date(arr.realtimeArrival).getTime() / 1000 + (arr.realtimeDelaySeconds ?? 0);
-            const bestTime = bestArrival
-              ? new Date(bestArrival.realtimeArrival).getTime() / 1000 +
-                (bestArrival.realtimeDelaySeconds ?? 0)
-              : Infinity;
-            if (!bestArrival || arrTime < bestTime) bestArrival = arr;
+    const mergedData: (StopResponse & { nextArrival?: ArrivalResponse | null })[] = [];
+    for (const [, group] of groupMap) {
+      const merged = { ...group[0] };
+      const seenRoutes = new Set<string>();
+      const allRoutes: StopRouteRef[] = [];
+      for (const s of group) {
+        for (const r of s.routes ?? []) {
+          if (!seenRoutes.has(r.routeId)) {
+            seenRoutes.add(r.routeId);
+            allRoutes.push(r);
           }
         }
-        return { ...merged, nextArrival: bestArrival };
-      },
-    );
+      }
+      allRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
+      merged.routes = allRoutes;
+
+      let bestArrival: ArrivalResponse | null = null;
+      for (const s of group) {
+        const arr = nextArrivalByStopId.get(s.stopId) ?? null;
+        if (arr) {
+          const arrTime =
+            new Date(arr.realtimeArrival).getTime() / 1000 + (arr.realtimeDelaySeconds ?? 0);
+          const bestTime = bestArrival
+            ? new Date(bestArrival.realtimeArrival).getTime() / 1000 +
+              (bestArrival.realtimeDelaySeconds ?? 0)
+            : Infinity;
+          if (!bestArrival || arrTime < bestTime) bestArrival = arr;
+        }
+      }
+      mergedData.push({ ...merged, nextArrival: bestArrival });
+    }
 
     const result = {
       data: mergedData,

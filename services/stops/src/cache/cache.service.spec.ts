@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { CacheService } from '@/modules/cache/cache.service';
+import { CacheService } from './cache.service';
 
 describe('CacheService', () => {
   let service: CacheService;

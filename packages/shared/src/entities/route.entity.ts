@@ -42,6 +42,10 @@ export class Route {
   @Column({ name: 'text_color', type: 'varchar', length: 6, nullable: true })
   textColor!: string | null;
 
+  @Index()
+  @Column({ name: 'has_stop_times', type: 'boolean', default: false })
+  hasStopTimes!: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

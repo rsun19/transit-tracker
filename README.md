@@ -146,7 +146,7 @@ Point your domain's DNS A record to the Hetzner server IP before the first push 
 
 ```
 frontend/          Next.js app (pages, components, api-client)
-backend/           NestJS API server + ingestion worker (shared codebase)
+services/          Microservices: agencies, routes, stops, alerts, vehicles, ingestion
 config/            Agency configuration (agencies.json)
 docker/            Database init SQL
 docs/              Project documentation

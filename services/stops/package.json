@@ -8,7 +8,8 @@
     "start:dev": "nest start --watch",
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "test:cov": "jest --coverage"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -23,6 +24,32 @@
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.17",
     "zod": "^3.22.4"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "cache/cache.service.ts",
+      "reconcileAddedTrips.ts",
+      "mergeColocatedStops.ts"
+    ],
+    "coverageReporters": [
+      "json-summary",
+      "json",
+      "lcov",
+      "text",
+      "clover"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
