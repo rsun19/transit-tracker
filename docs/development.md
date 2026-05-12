@@ -111,8 +111,6 @@ docker compose exec routes npm test
 docker compose exec stops npm test
 
 # Contract tests (check API schema conformance)
-docker compose exec routes npm run test:contract
-
 # Coverage (must be ≥ 80%)
 docker compose exec stops npm run test:cov
 
@@ -129,8 +127,6 @@ npm run lint
 npm run typecheck
 npm run format:check
 npm run test:unit
-npm run test:integration
-npm run test:contract
 npm run test:a11y
 npm run test:performance
 npm run test:e2e

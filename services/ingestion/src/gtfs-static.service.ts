@@ -95,6 +95,17 @@ export class GtfsStaticService {
       const agencyEntity = await this.upsertAgency(agency);
       const agencyId = agencyEntity.agencyId;
 
+      // Clean up stale data before re-inserting (idempotent re-ingestion)
+      this.logger.debug(`Deleting existing data for agency ${agencyId}...`);
+      await this.dataSource.query(`DELETE FROM stop_times WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM trips WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM stops WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM routes WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM shapes WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM service_calendars WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
+      await this.dataSource.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
+
       await this.importCsvWithCopy(
         path.join(tempDir, 'routes.txt'),
         agencyId,
@@ -134,23 +145,35 @@ export class GtfsStaticService {
         .query(
           `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
         )
-        .catch(() => {});
+        .catch((err: unknown) =>
+          this.logger.warn(`Failed to create idx_stops_stop_name_trgm: ${(err as Error).message}`),
+        );
       await this.dataSource
         .query(
           `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
         )
-        .catch(() => {});
+        .catch((err: unknown) =>
+          this.logger.warn(`Failed to create idx_stops_stop_code_trgm: ${(err as Error).message}`),
+        );
       this.logger.debug(`Building stop_times indexes...`);
       await this.dataSource
         .query(
           `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
         )
-        .catch(() => {});
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to create idx_stop_times_agency_stop_dept: ${(err as Error).message}`,
+          ),
+        );
       await this.dataSource
         .query(
           `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
         )
-        .catch(() => {});
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to create idx_stop_times_agency_trip_seq: ${(err as Error).message}`,
+          ),
+        );
 
       // Precompute route_stops — maps every stop to its serving routes
       this.logger.debug(`Creating route_stops table...`);
@@ -162,7 +185,8 @@ export class GtfsStaticService {
           route_id VARCHAR(100) NOT NULL,
           short_name VARCHAR(50),
           long_name TEXT,
-          route_type SMALLINT NOT NULL
+          route_type SMALLINT NOT NULL,
+          UNIQUE (agency_id, stop_id, route_id)
         )
       `);
       await this.dataSource.query(
@@ -211,14 +235,27 @@ export class GtfsStaticService {
       await this.dataSource.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
       await this.dataSource.query(
         `
+        WITH route_max_stops AS (
+          SELECT t2.agency_id, t2.route_id, MAX(t2.cnt)::int AS max_stops
+          FROM (
+            SELECT t3.agency_id, t3.route_id, COUNT(st3.stop_id) AS cnt
+            FROM trips t3
+            JOIN stop_times st3 ON st3.trip_id = t3.trip_id AND st3.agency_id = t3.agency_id
+            WHERE t3.agency_id = $1
+            GROUP BY t3.agency_id, t3.route_id, t3.trip_id
+          ) t2
+          GROUP BY t2.agency_id, t2.route_id
+        )
         INSERT INTO route_branches (agency_id, route_id, direction_id, trip_headsign, trip_id, shape_id, stop_count)
         SELECT DISTINCT ON (t.route_id, t.direction_id, t.trip_headsign)
           t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id,
           COUNT(st.stop_id)::int AS stop_count
         FROM trips t
         JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
+        JOIN route_max_stops rms ON rms.route_id = t.route_id AND rms.agency_id = t.agency_id
         WHERE t.agency_id = $1
-        GROUP BY t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id
+        GROUP BY t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id, rms.max_stops
+        HAVING COUNT(st.stop_id)::int >= rms.max_stops * 0.5
         ORDER BY t.route_id, t.direction_id, t.trip_headsign, stop_count DESC
       `,
         [agencyId],
@@ -541,13 +578,17 @@ export class GtfsStaticService {
       Array<{ stop_id: string; stop_name: string; lat: number; lon: number }>
     >(
       `SELECT stop_id, stop_name, ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
-       FROM stops WHERE agency_id = $1`,
+       FROM stops
+       WHERE agency_id = $1
+         AND (parent_station_id IS NULL OR parent_station_id = '')`,
       [agencyId],
     );
 
+    const stopIdList = stops.map((s) => s.stop_id);
     const routeRows = await this.dataSource.query<Array<{ stop_id: string; route_id: string }>>(
-      `SELECT stop_id, route_id FROM route_stops WHERE agency_id = $1`,
-      [agencyId],
+      `SELECT stop_id, route_id FROM route_stops
+       WHERE agency_id = $1 AND stop_id = ANY($2)`,
+      [agencyId, stopIdList],
     );
 
     const routesByStop = new Map<string, Set<string>>();
@@ -558,7 +599,7 @@ export class GtfsStaticService {
 
     const stopMap = new Map(stops.map((s) => [s.stop_id, s]));
     const consumed = new Set<string>();
-    const groupAssignments = new Map<string, string>();
+    const groupAssignments = new Map<string, string | null>();
 
     for (const stop of stops) {
       if (consumed.has(stop.stop_id)) continue;
@@ -570,7 +611,9 @@ export class GtfsStaticService {
         if (other.stop_name !== stop.stop_name) continue;
         const dLat = other.lat - stop.lat;
         const dLon = other.lon - stop.lon;
-        if (Math.sqrt(dLat * dLat + dLon * dLon) > STOP_MERGE_RADIUS_DEG) continue;
+        const meanLatRad = ((stop.lat + other.lat) / 2) * (Math.PI / 180);
+        const dLonScaled = dLon * Math.cos(meanLatRad);
+        if (Math.sqrt(dLat * dLat + dLonScaled * dLonScaled) > STOP_MERGE_RADIUS_DEG) continue;
         const otherRoutes = routesByStop.get(other.stop_id) ?? new Set();
         let sharesRoute = false;
         for (const rid of stopRoutes) {
@@ -582,9 +625,10 @@ export class GtfsStaticService {
         if (sharesRoute) group.push(other.stop_id);
       }
 
+      const groupId = group.length > 1 ? group[0] : null;
       for (const sid of group) {
         consumed.add(sid);
-        groupAssignments.set(sid, group[0]);
+        groupAssignments.set(sid, groupId);
       }
     }
 

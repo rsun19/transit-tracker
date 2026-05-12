@@ -40,7 +40,7 @@ export class StopsService {
     offset = 0,
   ): Promise<{ data: StopResponse[]; total: number }> {
     const cappedLimit = Math.min(limit, MAX_SEARCH_LIMIT);
-    const cacheKey = `cache:stops:search:v3:${agencyKey ?? 'all'}:${q}:${cappedLimit}:${offset}`;
+    const cacheKey = `cache:stops:search:v4:${agencyKey ?? 'all'}:${q}:${cappedLimit}:${offset}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as { data: StopResponse[]; total: number };
 
@@ -84,10 +84,10 @@ export class StopsService {
     const routesByStopId = new Map<string, StopRouteRef[]>();
     if (stopRows.length > 0) {
       const stopIdList = stopRows.map((r) => r.stop_id);
-      const agencyId = stopRows[0].agency_id;
       const routeRows = await this.dataSource.query<
         Array<{
           group_stop_id: string;
+          agency_id: string;
           routeId: string;
           shortName: string | null;
           longName: string | null;
@@ -95,18 +95,20 @@ export class StopsService {
         }>
       >(
         `SELECT rs.stop_id AS group_stop_id,
+                rs.agency_id,
                 rs.route_id AS "routeId",
                 rs.short_name AS "shortName",
                 rs.long_name AS "longName",
                 rs.route_type AS "routeType"
          FROM route_stops rs
-         WHERE rs.stop_id = ANY($1) AND rs.agency_id = $2
+         WHERE rs.stop_id = ANY($1)
          ORDER BY rs.stop_id, rs.short_name ASC`,
-        [stopIdList, agencyId],
+        [stopIdList],
       );
       for (const row of routeRows) {
-        if (!routesByStopId.has(row.group_stop_id)) routesByStopId.set(row.group_stop_id, []);
-        routesByStopId.get(row.group_stop_id)!.push({
+        const key = `${row.agency_id}:${row.group_stop_id}`;
+        if (!routesByStopId.has(key)) routesByStopId.set(key, []);
+        routesByStopId.get(key)!.push({
           routeId: row.routeId,
           shortName: row.shortName,
           longName: row.longName,
@@ -123,7 +125,7 @@ export class StopsService {
       stopCode: row.stop_code,
       lat: parseFloat(row.lat),
       lon: parseFloat(row.lon),
-      routes: routesByStopId.get(row.stop_id) ?? [],
+      routes: routesByStopId.get(`${row.agency_id}:${row.stop_id}`) ?? [],
     }));
 
     // Merge co-located stops using precomputed colocated_group_id
@@ -173,7 +175,7 @@ export class StopsService {
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
   ): Promise<{ data: ArrivalResponse[]; stopId: string; agencyKey: string; stopName: string }> {
-    const cacheKey = `cache:arrivals:v3:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
+    const cacheKey = `cache:arrivals:v5:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached)
       return JSON.parse(cached) as {
@@ -195,41 +197,57 @@ export class StopsService {
       Array<{
         stop_name: string;
         parent_station_id: string | null;
-        child_stop_ids: string[] | null;
       }>
     >(
-      `SELECT s.stop_name,
-              s.parent_station_id,
-              ARRAY_AGG(c.stop_id) FILTER (WHERE c.stop_id IS NOT NULL) AS child_stop_ids
+      `SELECT s.stop_name, s.parent_station_id
        FROM stops s
-       LEFT JOIN stops c ON c.parent_station_id = s.stop_id AND c.agency_id = s.agency_id
        WHERE s.stop_id = $1 AND s.agency_id = $2
-       GROUP BY s.stop_name, s.parent_station_id`,
+       LIMIT 1`,
       [stopId, agencyId],
     );
     const stopName: string = stopInfo?.stop_name ?? stopId;
-    const childStopIds = stopInfo?.child_stop_ids;
     const parentStationId = stopInfo?.parent_station_id ?? null;
 
     let effectiveStopIds: string[];
-    if (childStopIds && childStopIds.length > 0) {
-      effectiveStopIds = childStopIds;
-    } else if (parentStationId) {
+    if (parentStationId) {
+      // Child platform — find siblings that have stop_times via route_stops
       const siblingRows = await this.dataSource.query<Array<{ stop_id: string }>>(
-        `SELECT stop_id FROM stops WHERE parent_station_id = $1 AND agency_id = $2`,
+        `SELECT s.stop_id FROM stops s
+         WHERE s.parent_station_id = $1 AND s.agency_id = $2
+           AND EXISTS (SELECT 1 FROM route_stops rs WHERE rs.stop_id = s.stop_id AND rs.agency_id = s.agency_id)`,
         [parentStationId, agencyId],
       );
       effectiveStopIds = siblingRows.length > 0 ? siblingRows.map((r) => r.stop_id) : [stopId];
     } else {
-      const neighborRows = await this.dataSource.query<Array<{ stop_id: string }>>(
-        `SELECT stop_id FROM stops
-         WHERE stop_name = $1 AND agency_id = $2
-           AND ST_DWithin(location::geography,
-                          (SELECT location::geography FROM stops WHERE stop_id = $3 AND agency_id = $2 LIMIT 1),
-                          150)`,
-        [stopName, agencyId, stopId],
+      // Check if this is a parent station — find children that have stop_times
+      const childRows = await this.dataSource.query<Array<{ stop_id: string }>>(
+        `SELECT s.stop_id FROM stops s
+         WHERE s.parent_station_id = $1 AND s.agency_id = $2
+           AND EXISTS (SELECT 1 FROM route_stops rs WHERE rs.stop_id = s.stop_id AND rs.agency_id = s.agency_id)`,
+        [stopId, agencyId],
       );
-      effectiveStopIds = neighborRows.length > 0 ? neighborRows.map((r) => r.stop_id) : [stopId];
+      if (childRows.length > 0) {
+        effectiveStopIds = childRows.map((r) => r.stop_id);
+      } else {
+        // Standalone stop — use precomputed colocated_group_id if available
+        const [colocated] = await this.dataSource.query<
+          Array<{ colocated_group_id: string | null }>
+        >(`SELECT colocated_group_id FROM stops WHERE stop_id = $1 AND agency_id = $2`, [
+          stopId,
+          agencyId,
+        ]);
+        if (colocated?.colocated_group_id) {
+          const groupRows = await this.dataSource.query<Array<{ stop_id: string }>>(
+            `SELECT stop_id FROM stops
+             WHERE colocated_group_id = $1 AND agency_id = $2
+               AND stop_id != $3`,
+            [colocated.colocated_group_id, agencyId, stopId],
+          );
+          effectiveStopIds = [stopId, ...groupRows.map((r) => r.stop_id)];
+        } else {
+          effectiveStopIds = [stopId];
+        }
+      }
     }
 
     const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
@@ -247,12 +265,7 @@ export class StopsService {
     }
 
     const rows = await this.dataSource.query<Array<ArrivalRow>>(
-      `WITH stop_slice AS MATERIALIZED (
-         SELECT st.trip_id, st.agency_id, st.arrival_time, st.stop_id
-         FROM stop_times st
-         WHERE st.stop_id = ANY($1) AND st.agency_id = $2
-       ),
-       today_services AS MATERIALIZED (
+      `WITH today_services AS MATERIALIZED (
          SELECT sc.service_id, sc.agency_id, cand.d
          FROM service_calendars sc
          CROSS JOIN (VALUES ($3::date), ($4::date)) AS cand(d)
@@ -272,16 +285,17 @@ export class StopsService {
       SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time, stop_id
       FROM (
         SELECT DISTINCT ON (t.trip_id, ts.d)
-          ss.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
+          st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
           t.direction_id,
-          ((ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
-          ss.stop_id
-        FROM stop_slice ss
-        JOIN trips t         ON t.trip_id    = ss.trip_id    AND t.agency_id  = ss.agency_id
+          ((ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
+          st.stop_id
+        FROM stop_times st
+        JOIN trips t         ON t.trip_id    = st.trip_id    AND t.agency_id  = st.agency_id
         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
         JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
-        WHERE (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 >= $6::timestamp
-        ORDER BY t.trip_id, ts.d, (ts.d + ss.arrival_time)::timestamp AT TIME ZONE $5 ASC
+        WHERE st.stop_id = ANY($1) AND st.agency_id = $2
+          AND (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 >= $6::timestamp
+        ORDER BY t.trip_id, ts.d, (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 ASC
       ) deduped
       ORDER BY arrival_time ASC
       LIMIT $7`,
@@ -548,6 +562,7 @@ export class StopsService {
       const routeRows = await this.dataSource.query<
         Array<{
           group_stop_id: string;
+          agency_id: string;
           routeId: string;
           shortName: string | null;
           longName: string | null;
@@ -555,18 +570,20 @@ export class StopsService {
         }>
       >(
         `SELECT rs.stop_id AS group_stop_id,
+                rs.agency_id,
                 rs.route_id AS "routeId",
                 rs.short_name AS "shortName",
                 rs.long_name AS "longName",
                 rs.route_type AS "routeType"
          FROM route_stops rs
-         WHERE rs.stop_id = ANY($1) AND rs.agency_id = $2
+         WHERE rs.stop_id = ANY($1)
          ORDER BY rs.stop_id, rs.short_name ASC`,
-        [stopIdList, batchAgencyId],
+        [stopIdList],
       );
       for (const row of routeRows) {
-        if (!routesByStopId.has(row.group_stop_id)) routesByStopId.set(row.group_stop_id, []);
-        routesByStopId.get(row.group_stop_id)!.push({
+        const key = `${row.agency_id}:${row.group_stop_id}`;
+        if (!routesByStopId.has(key)) routesByStopId.set(key, []);
+        routesByStopId.get(key)!.push({
           routeId: row.routeId,
           shortName: row.shortName,
           longName: row.longName,
@@ -593,7 +610,7 @@ export class StopsService {
       lat: row.lat,
       lon: row.lon,
       distanceMetres: Math.round(row.distance_metres),
-      routes: routesByStopId.get(row.stop_id) ?? [],
+      routes: routesByStopId.get(`${row.agency_id}:${row.stop_id}`) ?? [],
     }));
 
     // Merge co-located stops using precomputed colocated_group_id
