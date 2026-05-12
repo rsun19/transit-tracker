@@ -101,7 +101,7 @@ export class RoutesService {
   }
 
   async findOne(routeId: string, agencyKey: string): Promise<RouteResponse> {
-    const cacheKey = `cache:route:v4:${agencyKey}:${routeId}`;
+    const cacheKey = `cache:route:v5:${agencyKey}:${routeId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as RouteResponse;
 
@@ -136,7 +136,8 @@ export class RoutesService {
 
     const branchTripIds = branchReps.map((b) => b.trip_id);
     const allStopRows = await this.routeRepo.query<Array<RouteStopResponse & { trip_id: string }>>(
-      `SELECT st.trip_id,
+      `SELECT DISTINCT ON (st.trip_id, st.stop_sequence)
+              st.trip_id,
               s.stop_id AS "stopId",
               s.stop_name AS "stopName",
               ST_Y(s.location::geometry) AS latitude,
