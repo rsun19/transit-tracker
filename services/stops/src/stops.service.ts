@@ -131,7 +131,8 @@ export class StopsService {
     // Merge co-located stops using precomputed colocated_group_id
     const groupMap = new Map<string, StopResponse[]>();
     for (let i = 0; i < rawData.length; i++) {
-      const gid = stopRows[i].colocated_group_id ?? rawData[i].stopId;
+      const row = stopRows[i];
+      const gid = `${row.agency_id}:${row.colocated_group_id ?? rawData[i].stopId}`;
       if (!groupMap.has(gid)) groupMap.set(gid, []);
       groupMap.get(gid)!.push(rawData[i]);
     }
@@ -616,7 +617,10 @@ export class StopsService {
     // Merge co-located stops using precomputed colocated_group_id
     const groupMap = new Map<string, StopResponse[]>();
     for (const s of stops) {
-      const gid = rows.find((r) => r.stop_id === s.stopId)?.colocated_group_id ?? s.stopId;
+      const matchingRow = rows.find((r) => r.stop_id === s.stopId);
+      const gid = matchingRow
+        ? `${matchingRow.agency_id}:${matchingRow.colocated_group_id ?? s.stopId}`
+        : s.stopId;
       if (!groupMap.has(gid)) groupMap.set(gid, []);
       groupMap.get(gid)!.push(s);
     }

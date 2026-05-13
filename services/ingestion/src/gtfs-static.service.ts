@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { Agency, STOP_MERGE_RADIUS_DEG } from '@transit-tracker/shared';
 import type { ResolvedAgency } from '@transit-tracker/shared';
 import { ConfigService } from '@nestjs/config';
@@ -97,190 +97,210 @@ export class GtfsStaticService {
       const agencyEntity = await this.upsertAgency(agency);
       const agencyId = agencyEntity.agencyId;
 
-      // Clean up stale data before re-inserting (idempotent re-ingestion)
-      this.logger.debug(`Deleting existing data for agency ${agencyId}...`);
-      await this.dataSource.query(`DELETE FROM stop_times WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM trips WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM stops WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM routes WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM shapes WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM service_calendars WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      try {
+        // Clean up stale data before re-inserting (idempotent re-ingestion)
+        this.logger.debug(`Deleting existing data for agency ${agencyId}...`);
+        await queryRunner.query(`DELETE FROM stop_times WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM trips WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM stops WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM routes WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM shapes WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM service_calendars WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
 
-      await this.importCsvWithCopy(
-        path.join(tempDir, 'routes.txt'),
-        agencyId,
-        async (rows: GtfsRoute[]) => {
-          await this.batchInsertRoutes(agencyId, rows);
-        },
-      );
-      await this.importCsvWithCopy(
-        path.join(tempDir, 'trips.txt'),
-        agencyId,
-        async (rows: GtfsTrip[]) => {
-          await this.batchInsertTrips(agencyId, rows);
-        },
-      );
-      await this.importCsvWithCopy(
-        path.join(tempDir, 'stops.txt'),
-        agencyId,
-        async (rows: GtfsStop[]) => {
-          await this.batchInsertStops(agencyId, rows);
-        },
-      );
-      await this.importCsvWithCopy(
-        path.join(tempDir, 'calendar.txt'),
-        agencyId,
-        async (rows: GtfsCalendar[]) => {
-          await this.batchInsertCalendars(agencyId, rows);
-        },
-      );
-
-      // Use COPY for large tables
-      await this.copyStopTimes(tempDir, agencyId);
-      await this.copyShapes(tempDir, agencyId);
-
-      // Build indexes for query performance
-      this.logger.debug(`Building GIN trigram indexes on stops...`);
-      await this.dataSource
-        .query(
-          `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
-        )
-        .catch((err: unknown) =>
-          this.logger.warn(`Failed to create idx_stops_stop_name_trgm: ${(err as Error).message}`),
+        await this.importCsvWithCopy(
+          path.join(tempDir, 'routes.txt'),
+          agencyId,
+          async (rows: GtfsRoute[]) => {
+            await this.batchInsertRoutes(agencyId, rows, queryRunner);
+          },
         );
-      await this.dataSource
-        .query(
-          `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
-        )
-        .catch((err: unknown) =>
-          this.logger.warn(`Failed to create idx_stops_stop_code_trgm: ${(err as Error).message}`),
+        await this.importCsvWithCopy(
+          path.join(tempDir, 'trips.txt'),
+          agencyId,
+          async (rows: GtfsTrip[]) => {
+            await this.batchInsertTrips(agencyId, rows, queryRunner);
+          },
         );
-      this.logger.debug(`Building stop_times indexes...`);
-      await this.dataSource
-        .query(
-          `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
-        )
-        .catch((err: unknown) =>
-          this.logger.warn(
-            `Failed to create idx_stop_times_agency_stop_dept: ${(err as Error).message}`,
-          ),
+        await this.importCsvWithCopy(
+          path.join(tempDir, 'stops.txt'),
+          agencyId,
+          async (rows: GtfsStop[]) => {
+            await this.batchInsertStops(agencyId, rows, queryRunner);
+          },
         );
-      await this.dataSource
-        .query(
-          `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
-        )
-        .catch((err: unknown) =>
-          this.logger.warn(
-            `Failed to create idx_stop_times_agency_trip_seq: ${(err as Error).message}`,
-          ),
+        await this.importCsvWithCopy(
+          path.join(tempDir, 'calendar.txt'),
+          agencyId,
+          async (rows: GtfsCalendar[]) => {
+            await this.batchInsertCalendars(agencyId, rows, queryRunner);
+          },
         );
 
-      // Precompute route_stops — maps every stop to its serving routes
-      this.logger.debug(`Creating route_stops table...`);
-      await this.dataSource.query(`
-        CREATE TABLE IF NOT EXISTS route_stops (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-          stop_id VARCHAR(100) NOT NULL,
-          route_id VARCHAR(100) NOT NULL,
-          short_name VARCHAR(50),
-          long_name TEXT,
-          route_type SMALLINT NOT NULL,
-          UNIQUE (agency_id, stop_id, route_id)
-        )
-      `);
-      await this.dataSource.query(
-        `CREATE INDEX IF NOT EXISTS idx_route_stops_agency_stop ON route_stops (agency_id, stop_id)`,
-      );
-      this.logger.debug(`Populating route_stops from stop_times...`);
-      await this.dataSource.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(
-        `
-        INSERT INTO route_stops (agency_id, stop_id, route_id, short_name, long_name, route_type)
-        SELECT DISTINCT st.agency_id, st.stop_id, r.route_id, r.short_name, r.long_name, r.route_type
-        FROM stop_times st
-        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
-        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
-        WHERE st.agency_id = $1
-        UNION
-        SELECT DISTINCT st.agency_id, s.parent_station_id, r.route_id, r.short_name, r.long_name, r.route_type
-        FROM stop_times st
-        JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = st.agency_id
-        JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
-        JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
-        WHERE st.agency_id = $1
-          AND s.parent_station_id IS NOT NULL AND s.parent_station_id != ''
-      `,
-        [agencyId],
-      );
+        // Use COPY for large tables
+        await this.copyStopTimes(tempDir, agencyId);
+        await this.copyShapes(tempDir, agencyId);
 
-      // Precompute route_branches — representative trip per (route, direction, headsign)
-      this.logger.debug(`Creating route_branches table...`);
-      await this.dataSource.query(`
-        CREATE TABLE IF NOT EXISTS route_branches (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-          route_id VARCHAR(100) NOT NULL,
-          direction_id SMALLINT,
-          trip_headsign TEXT,
-          trip_id VARCHAR(100) NOT NULL,
-          shape_id VARCHAR(100),
-          stop_count INTEGER NOT NULL
-        )
-      `);
-      await this.dataSource.query(
-        `CREATE INDEX IF NOT EXISTS idx_route_branches_agency_route ON route_branches (agency_id, route_id)`,
-      );
-      this.logger.debug(`Populating route_branches from trips...`);
-      await this.dataSource.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
-      await this.dataSource.query(
-        `
-        WITH route_max_stops AS (
-          SELECT t2.agency_id, t2.route_id, MAX(t2.cnt)::int AS max_stops
-          FROM (
-            SELECT t3.agency_id, t3.route_id, COUNT(st3.stop_id) AS cnt
-            FROM trips t3
-            JOIN stop_times st3 ON st3.trip_id = t3.trip_id AND st3.agency_id = t3.agency_id
-            WHERE t3.agency_id = $1
-            GROUP BY t3.agency_id, t3.route_id, t3.trip_id
-          ) t2
-          GROUP BY t2.agency_id, t2.route_id
-        )
-        INSERT INTO route_branches (agency_id, route_id, direction_id, trip_headsign, trip_id, shape_id, stop_count)
-        SELECT DISTINCT ON (t.route_id, t.direction_id, t.trip_headsign)
-          t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id,
-          COUNT(st.stop_id)::int AS stop_count
-        FROM trips t
-        JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-        JOIN route_max_stops rms ON rms.route_id = t.route_id AND rms.agency_id = t.agency_id
-        WHERE t.agency_id = $1
-        GROUP BY t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id, rms.max_stops
-        HAVING COUNT(st.stop_id)::int >= rms.max_stops * 0.5
-        ORDER BY t.route_id, t.direction_id, t.trip_headsign, stop_count DESC
-      `,
-        [agencyId],
-      );
-
-      // Update has_stop_times flag on routes
-      this.logger.debug(`Updating has_stop_times on routes...`);
-      await this.dataSource.query(
-        `
-        UPDATE routes SET has_stop_times = true
-        WHERE agency_id = $1
-          AND EXISTS (
-            SELECT 1 FROM trips t
-            JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-            WHERE t.route_id = routes.route_id AND t.agency_id = routes.agency_id
+        // Build indexes for query performance
+        this.logger.debug(`Building GIN trigram indexes on stops...`);
+        await queryRunner
+          .query(
+            `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
           )
-      `,
-        [agencyId],
-      );
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to create idx_stops_stop_name_trgm: ${(err as Error).message}`,
+            ),
+          );
+        await queryRunner
+          .query(
+            `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
+          )
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to create idx_stops_stop_code_trgm: ${(err as Error).message}`,
+            ),
+          );
+        this.logger.debug(`Building stop_times indexes...`);
+        await queryRunner
+          .query(
+            `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
+          )
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to create idx_stop_times_agency_stop_dept: ${(err as Error).message}`,
+            ),
+          );
+        await queryRunner
+          .query(
+            `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
+          )
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to create idx_stop_times_agency_trip_seq: ${(err as Error).message}`,
+            ),
+          );
 
-      // Precompute colocated_group_id on stops
-      this.logger.debug(`Computing colocated stop groups...`);
-      await this.computeColocatedGroups(agencyId);
+        // Precompute route_stops — maps every stop to its serving routes
+        this.logger.debug(`Creating route_stops table...`);
+        await queryRunner.query(`
+          CREATE TABLE IF NOT EXISTS route_stops (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
+            stop_id VARCHAR(100) NOT NULL,
+            route_id VARCHAR(100) NOT NULL,
+            short_name VARCHAR(50),
+            long_name TEXT,
+            route_type SMALLINT NOT NULL,
+            UNIQUE (agency_id, stop_id, route_id)
+          )
+        `);
+        await queryRunner.query(
+          `CREATE INDEX IF NOT EXISTS idx_route_stops_agency_stop ON route_stops (agency_id, stop_id)`,
+        );
+        this.logger.debug(`Populating route_stops from stop_times...`);
+        await queryRunner.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(
+          `
+          INSERT INTO route_stops (agency_id, stop_id, route_id, short_name, long_name, route_type)
+          SELECT DISTINCT st.agency_id, st.stop_id, r.route_id, r.short_name, r.long_name, r.route_type
+          FROM stop_times st
+          JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
+          JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
+          WHERE st.agency_id = $1
+          UNION
+          SELECT DISTINCT st.agency_id, s.parent_station_id, r.route_id, r.short_name, r.long_name, r.route_type
+          FROM stop_times st
+          JOIN stops s ON s.stop_id = st.stop_id AND s.agency_id = st.agency_id
+          JOIN trips t ON t.trip_id = st.trip_id AND t.agency_id = st.agency_id
+          JOIN routes r ON r.route_id = t.route_id AND r.agency_id = t.agency_id
+          WHERE st.agency_id = $1
+            AND s.parent_station_id IS NOT NULL AND s.parent_station_id != ''
+        `,
+          [agencyId],
+        );
+
+        // Precompute route_branches — representative trip per (route, direction, headsign)
+        this.logger.debug(`Creating route_branches table...`);
+        await queryRunner.query(`
+          CREATE TABLE IF NOT EXISTS route_branches (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
+            route_id VARCHAR(100) NOT NULL,
+            direction_id SMALLINT,
+            trip_headsign TEXT,
+            trip_id VARCHAR(100) NOT NULL,
+            shape_id VARCHAR(100),
+            stop_count INTEGER NOT NULL
+          )
+        `);
+        await queryRunner.query(
+          `CREATE INDEX IF NOT EXISTS idx_route_branches_agency_route ON route_branches (agency_id, route_id)`,
+        );
+        this.logger.debug(`Populating route_branches from trips...`);
+        await queryRunner.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(
+          `
+          WITH route_max_stops AS (
+            SELECT t2.agency_id, t2.route_id, MAX(t2.cnt)::int AS max_stops
+            FROM (
+              SELECT t3.agency_id, t3.route_id, COUNT(st3.stop_id) AS cnt
+              FROM trips t3
+              JOIN stop_times st3 ON st3.trip_id = t3.trip_id AND st3.agency_id = t3.agency_id
+              WHERE t3.agency_id = $1
+              GROUP BY t3.agency_id, t3.route_id, t3.trip_id
+            ) t2
+            GROUP BY t2.agency_id, t2.route_id
+          )
+          INSERT INTO route_branches (agency_id, route_id, direction_id, trip_headsign, trip_id, shape_id, stop_count)
+          SELECT DISTINCT ON (t.route_id, t.direction_id, t.trip_headsign)
+            t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id,
+            COUNT(st.stop_id)::int AS stop_count
+          FROM trips t
+          JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
+          JOIN route_max_stops rms ON rms.route_id = t.route_id AND rms.agency_id = t.agency_id
+          WHERE t.agency_id = $1
+          GROUP BY t.agency_id, t.route_id, t.direction_id, t.trip_headsign, t.trip_id, t.shape_id, rms.max_stops
+          HAVING COUNT(st.stop_id)::int >= rms.max_stops * 0.5
+          ORDER BY t.route_id, t.direction_id, t.trip_headsign, stop_count DESC
+        `,
+          [agencyId],
+        );
+
+        // Update has_stop_times flag on routes
+        this.logger.debug(`Updating has_stop_times on routes...`);
+        await queryRunner.query(
+          `
+          UPDATE routes SET has_stop_times = true
+          WHERE agency_id = $1
+            AND EXISTS (
+              SELECT 1 FROM trips t
+              JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
+              WHERE t.route_id = routes.route_id AND t.agency_id = routes.agency_id
+            )
+        `,
+          [agencyId],
+        );
+
+        // Precompute colocated_group_id on stops
+        this.logger.debug(`Computing colocated stop groups...`);
+        await this.computeColocatedGroups(agencyId, queryRunner);
+
+        await queryRunner.commitTransaction();
+        this.logger.debug(`Transaction committed for agency ${agencyId}`);
+      } catch (txErr) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error(
+          `Transaction rolled back for agency ${agencyId}: ${(txErr as Error).message}`,
+        );
+        throw txErr;
+      } finally {
+        await queryRunner.release();
+      }
 
       this.logger.debug(`Analyzing tables...`);
       await Promise.all([
@@ -378,7 +398,11 @@ export class GtfsStaticService {
     });
   }
 
-  private async batchInsertRoutes(agencyId: string, routes: GtfsRoute[]): Promise<void> {
+  private async batchInsertRoutes(
+    agencyId: string,
+    routes: GtfsRoute[],
+    queryRunner: QueryRunner,
+  ): Promise<void> {
     const cols = 7;
     const maxParams = 65535;
     const chunkSize = Math.floor(maxParams / cols);
@@ -401,7 +425,7 @@ export class GtfsStaticService {
           r.route_text_color || null,
         );
       }
-      await this.dataSource.query(
+      await queryRunner.query(
         `INSERT INTO routes (agency_id, route_id, short_name, long_name, route_type, color, text_color) VALUES ${placeholders.join(', ')}
          ON CONFLICT (agency_id, route_id) DO UPDATE SET short_name = EXCLUDED.short_name, long_name = EXCLUDED.long_name, route_type = EXCLUDED.route_type, color = EXCLUDED.color, text_color = EXCLUDED.text_color`,
         params,
@@ -409,7 +433,11 @@ export class GtfsStaticService {
     }
   }
 
-  private async batchInsertTrips(agencyId: string, trips: GtfsTrip[]): Promise<void> {
+  private async batchInsertTrips(
+    agencyId: string,
+    trips: GtfsTrip[],
+    queryRunner: QueryRunner,
+  ): Promise<void> {
     const cols = 8;
     const maxParams = 65535;
     const chunkSize = Math.floor(maxParams / cols);
@@ -433,7 +461,7 @@ export class GtfsStaticService {
           t.wheelchair_accessible ? parseInt(t.wheelchair_accessible) : null,
         );
       }
-      await this.dataSource.query(
+      await queryRunner.query(
         `INSERT INTO trips (agency_id, trip_id, route_id, service_id, trip_headsign, direction_id, shape_id, wheelchair_accessible) VALUES ${placeholders.join(', ')}
          ON CONFLICT (agency_id, trip_id) DO UPDATE SET route_id = EXCLUDED.route_id, service_id = EXCLUDED.service_id, trip_headsign = EXCLUDED.trip_headsign, direction_id = EXCLUDED.direction_id, shape_id = EXCLUDED.shape_id, wheelchair_accessible = EXCLUDED.wheelchair_accessible`,
         params,
@@ -441,7 +469,11 @@ export class GtfsStaticService {
     }
   }
 
-  private async batchInsertStops(agencyId: string, stops: GtfsStop[]): Promise<void> {
+  private async batchInsertStops(
+    agencyId: string,
+    stops: GtfsStop[],
+    queryRunner: import('typeorm').QueryRunner,
+  ): Promise<void> {
     const valid = stops.filter((s) => {
       const lat = parseFloat(s.stop_lat);
       const lon = parseFloat(s.stop_lon);
@@ -473,7 +505,7 @@ export class GtfsStaticService {
           s.wheelchair_boarding ? parseInt(s.wheelchair_boarding) : null,
         );
       }
-      await this.dataSource.query(
+      await queryRunner.query(
         `INSERT INTO stops (agency_id, stop_id, stop_name, stop_code, location, parent_station_id, wheelchair_boarding) VALUES ${placeholders.join(', ')}
          ON CONFLICT (agency_id, stop_id) DO UPDATE SET stop_name = EXCLUDED.stop_name, stop_code = EXCLUDED.stop_code, location = EXCLUDED.location, parent_station_id = EXCLUDED.parent_station_id, wheelchair_boarding = EXCLUDED.wheelchair_boarding`,
         params,
@@ -481,7 +513,11 @@ export class GtfsStaticService {
     }
   }
 
-  private async batchInsertCalendars(agencyId: string, calendars: GtfsCalendar[]): Promise<void> {
+  private async batchInsertCalendars(
+    agencyId: string,
+    calendars: GtfsCalendar[],
+    queryRunner: import('typeorm').QueryRunner,
+  ): Promise<void> {
     const cols = 11;
     const maxParams = 65535;
     const chunkSize = Math.floor(maxParams / cols);
@@ -509,7 +545,7 @@ export class GtfsStaticService {
           c.end_date,
         );
       }
-      await this.dataSource.query(
+      await queryRunner.query(
         `INSERT INTO service_calendars (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date) VALUES ${placeholders.join(', ')}
          ON CONFLICT (agency_id, service_id) DO UPDATE SET monday = EXCLUDED.monday, tuesday = EXCLUDED.tuesday, wednesday = EXCLUDED.wednesday, thursday = EXCLUDED.thursday, friday = EXCLUDED.friday, saturday = EXCLUDED.saturday, sunday = EXCLUDED.sunday, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
         params,
@@ -628,23 +664,21 @@ export class GtfsStaticService {
     }
   }
 
-  private async computeColocatedGroups(agencyId: string): Promise<void> {
-    const stops = await this.dataSource.query<
-      Array<{ stop_id: string; stop_name: string; lat: number; lon: number }>
-    >(
+  private async computeColocatedGroups(agencyId: string, queryRunner: QueryRunner): Promise<void> {
+    const stops = (await queryRunner.query(
       `SELECT stop_id, stop_name, ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
        FROM stops
        WHERE agency_id = $1
          AND (parent_station_id IS NULL OR parent_station_id = '')`,
       [agencyId],
-    );
+    )) as Array<{ stop_id: string; stop_name: string; lat: number; lon: number }>;
 
     const stopIdList = stops.map((s) => s.stop_id);
-    const routeRows = await this.dataSource.query<Array<{ stop_id: string; route_id: string }>>(
+    const routeRows = (await queryRunner.query(
       `SELECT stop_id, route_id FROM route_stops
        WHERE agency_id = $1 AND stop_id = ANY($2)`,
       [agencyId, stopIdList],
-    );
+    )) as Array<{ stop_id: string; route_id: string }>;
 
     const routesByStop = new Map<string, Set<string>>();
     for (const r of routeRows) {
@@ -687,21 +721,27 @@ export class GtfsStaticService {
       }
     }
 
-    // Batch-update colocated_group_id
+    // Batch-update colocated_group_id in chunks to stay within PostgreSQL's param limit
     if (groupAssignments.size > 0) {
-      const params: unknown[] = [];
-      const cases: string[] = [];
-      for (const [sid, gid] of groupAssignments) {
-        const n = params.length + 1;
-        cases.push(`WHEN stop_id = $${n} THEN $${n + 1}`);
-        params.push(sid, gid);
+      const MAX_PARAMS = 32767;
+      const MAX_PAIRS_PER_BATCH = Math.floor((MAX_PARAMS - 1) / 2);
+      const entries = [...groupAssignments];
+      for (let i = 0; i < entries.length; i += MAX_PAIRS_PER_BATCH) {
+        const batch = entries.slice(i, i + MAX_PAIRS_PER_BATCH);
+        const params: unknown[] = [];
+        const cases: string[] = [];
+        for (const [sid, gid] of batch) {
+          const n = params.length + 1;
+          cases.push(`WHEN stop_id = $${n} THEN $${n + 1}`);
+          params.push(sid, gid);
+        }
+        params.push(agencyId);
+        await queryRunner.query(
+          `UPDATE stops SET colocated_group_id = CASE ${cases.join(' ')} ELSE NULL END
+           WHERE agency_id = $${params.length}`,
+          params,
+        );
       }
-      params.push(agencyId);
-      await this.dataSource.query(
-        `UPDATE stops SET colocated_group_id = CASE ${cases.join(' ')} ELSE NULL END
-         WHERE agency_id = $${params.length}`,
-        params,
-      );
     }
 
     const grouppedCount = new Set(groupAssignments.values()).size;

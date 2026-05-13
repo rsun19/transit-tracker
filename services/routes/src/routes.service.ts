@@ -116,7 +116,7 @@ export class RoutesService {
 
     // Fetch precomputed route branches — one representative trip per
     // (direction_id, headsign) chosen during ingestion by stop count DESC.
-    const branchReps = await this.routeRepo.query<
+    let branchReps = await this.routeRepo.query<
       Array<{
         trip_id: string;
         direction_id: number;
@@ -131,6 +131,29 @@ export class RoutesService {
        ORDER BY stop_count DESC`,
       [routeId, agencyId],
     );
+
+    // Fallback when route_branches table is empty (e.g. before first ingestion)
+    if (branchReps.length === 0) {
+      branchReps = await this.routeRepo.query<
+        Array<{
+          trip_id: string;
+          direction_id: number;
+          shape_id: string | null;
+          trip_headsign: string | null;
+          stop_count: string;
+        }>
+      >(
+        `SELECT DISTINCT ON (t.direction_id, t.trip_headsign)
+                t.trip_id, t.direction_id, t.trip_headsign, t.shape_id,
+                COUNT(st.stop_id)::int AS stop_count
+         FROM trips t
+         JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
+         WHERE t.route_id = $1 AND t.agency_id = $2
+         GROUP BY t.trip_id, t.direction_id, t.trip_headsign, t.shape_id
+         ORDER BY t.direction_id, t.trip_headsign, stop_count DESC`,
+        [routeId, agencyId],
+      );
+    }
 
     if (branchReps.length === 0) throw new NotFoundException(`Route ${routeId} not found`);
 
