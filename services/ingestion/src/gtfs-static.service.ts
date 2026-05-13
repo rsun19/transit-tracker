@@ -12,6 +12,8 @@ import * as unzipper from 'unzipper';
 import { pipeline } from 'stream/promises';
 import { createReadStream } from 'fs';
 import csvParser from 'csv-parser';
+import { from as copyFrom } from 'pg-copy-streams';
+import type { Pool, PoolClient } from 'pg';
 
 interface GtfsRoute {
   route_id: string;
@@ -518,59 +520,112 @@ export class GtfsStaticService {
   private async copyStopTimes(tempDir: string, agencyId: string): Promise<void> {
     const filePath = path.join(tempDir, 'stop_times.txt');
     if (!fs.existsSync(filePath)) return;
-    this.logger.log(`Importing stop_times for agency ${agencyId}`);
+    this.logger.log(`Starting streaming stop_times import for agency ${agencyId}...`);
 
-    interface GtfsStopTimeRow {
-      trip_id: string;
-      stop_id: string;
-      stop_sequence: string;
-      arrival_time: string;
-      departure_time: string;
-      stop_headsign: string;
-      pickup_type: string;
-      drop_off_type: string;
-    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pgPool: Pool = (this.dataSource.driver as unknown as { master: Pool }).master;
+    const pgClient: PoolClient = await pgPool.connect();
+    const startTime = Date.now();
+    try {
+      let rowCount = 0;
+      let settled = false;
 
-    const rows: GtfsStopTimeRow[] = await new Promise((resolve, reject) => {
-      const acc: GtfsStopTimeRow[] = [];
-      createReadStream(filePath)
-        .pipe(csvParser())
-        .on('data', (r: GtfsStopTimeRow) => acc.push(r))
-        .on('end', () => resolve(acc))
-        .on('error', reject);
-    });
-
-    const cols = 9;
-    const maxParams = 65535;
-    const chunkSize = Math.floor(maxParams / cols);
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const chunk = rows.slice(i, i + chunkSize);
-      const placeholders: string[] = [];
-      const params: unknown[] = [];
-      for (const r of chunk) {
-        const n = params.length + 1;
-        placeholders.push(
-          `($${n}, $${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}, $${n + 5}, $${n + 6}, $${n + 7}, $${n + 8})`,
+      await new Promise<void>((resolve, reject) => {
+        const copyStream = pgClient.query(
+          copyFrom(
+            `COPY stop_times (agency_id, trip_id, stop_id, stop_sequence, arrival_time, departure_time, stop_headsign, pickup_type, drop_off_type) FROM STDIN WITH (FORMAT csv, NULL '')`,
+          ),
         );
-        params.push(
-          agencyId,
-          r.trip_id,
-          r.stop_id,
-          parseInt(r.stop_sequence),
-          r.arrival_time || null,
-          r.departure_time || null,
-          r.stop_headsign || null,
-          r.pickup_type ? parseInt(r.pickup_type) : null,
-          r.drop_off_type ? parseInt(r.drop_off_type) : null,
-        );
-      }
-      await this.dataSource.query(
-        `INSERT INTO stop_times (agency_id, trip_id, stop_id, stop_sequence, arrival_time, departure_time, stop_headsign, pickup_type, drop_off_type) VALUES ${placeholders.join(', ')}
-         ON CONFLICT DO NOTHING`,
-        params,
-      );
+        const readStream = createReadStream(filePath);
+        const csvStream = readStream.pipe(csvParser());
+        let waitingForDrain = false;
+
+        const finalize = (err?: Error): void => {
+          if (settled) return;
+          settled = true;
+          pgClient.off('error', onClientError);
+          copyStream.off('finish', onFinish);
+          csvStream.off('error', onStreamError);
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        };
+
+        const onStreamError = (err: Error): void => {
+          this.logger.error(`copyStopTimes stream error after ${rowCount} rows: ${err.message}`);
+          copyStream.destroy(err);
+          readStream.destroy(err);
+          finalize(err);
+        };
+
+        const onClientError = (err: Error): void => {
+          this.logger.error(`copyStopTimes DB error after ${rowCount} rows: ${err.message}`);
+          readStream.destroy(err);
+          finalize(err);
+        };
+
+        const onFinish = (): void => {
+          this.logger.log(
+            `Imported ${rowCount} stop_times rows for agency ${agencyId} in ${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+          );
+          finalize();
+        };
+
+        const csvField = (v: string | number | null | undefined): string => {
+          if (v === null || v === undefined || v === '') return '';
+          const s = String(v);
+          if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes('\r')) {
+            return '"' + s.replace(/"/g, '""') + '"';
+          }
+          return s;
+        };
+
+        pgClient.on('error', onClientError);
+        copyStream.on('error', (err: Error) => {
+          if (settled) {
+            this.logger.warn(`copyStopTimes late error: ${err.message}`);
+            return;
+          }
+          onStreamError(err);
+        });
+        copyStream.on('finish', onFinish);
+
+        csvStream.on('data', (row: Record<string, string>) => {
+          rowCount++;
+          const line =
+            [
+              agencyId,
+              csvField(row['trip_id']),
+              csvField(row['stop_id']),
+              row['stop_sequence'] ?? '0',
+              row['arrival_time'] ?? '',
+              row['departure_time'] ?? '',
+              csvField(row['stop_headsign'] ?? null),
+              row['pickup_type'] ?? '',
+              row['drop_off_type'] ?? '',
+            ].join(',') + '\n';
+          if (!copyStream.write(line)) {
+            csvStream.pause();
+            if (!waitingForDrain) {
+              waitingForDrain = true;
+              copyStream.once('drain', () => {
+                waitingForDrain = false;
+                csvStream.resume();
+              });
+            }
+          }
+        });
+
+        csvStream.on('end', () => {
+          copyStream.end();
+        });
+        csvStream.on('error', onStreamError);
+      });
+    } finally {
+      pgClient.release();
     }
-    this.logger.log(`Imported ${rows.length} stop_times rows for agency ${agencyId}`);
   }
 
   private async computeColocatedGroups(agencyId: string): Promise<void> {
