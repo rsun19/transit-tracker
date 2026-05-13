@@ -1,8 +1,13 @@
 import { spawnSync } from 'node:child_process';
 
 const checks = [
-  { name: 'backend', args: ['run', 'typecheck', '--prefix', 'backend'] },
   { name: 'frontend', args: ['run', 'typecheck', '--prefix', 'frontend'] },
+  { name: 'agencies', args: ['run', 'typecheck', '--prefix', 'services/agencies'] },
+  { name: 'alerts', args: ['run', 'typecheck', '--prefix', 'services/alerts'] },
+  { name: 'vehicles', args: ['run', 'typecheck', '--prefix', 'services/vehicles'] },
+  { name: 'routes', args: ['run', 'typecheck', '--prefix', 'services/routes'] },
+  { name: 'stops', args: ['run', 'typecheck', '--prefix', 'services/stops'] },
+  { name: 'ingestion', args: ['run', 'typecheck', '--prefix', 'services/ingestion'] },
 ];
 
 let failures = 0;

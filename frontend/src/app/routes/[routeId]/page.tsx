@@ -91,12 +91,18 @@ export default function RouteDetailPage() {
   if (canonical.length >= 2) {
     // True branching (e.g. Red Line: Ashmont + Braintree). Use only dir=0 branches
     // to compute the shared trunk and per-branch unique tails.
-    const stopIdSets = canonical.map((b) => new Set(b.stops.map((s) => s.stopId)));
-    const trunkIds = stopIdSets.reduce((acc, set) => new Set([...acc].filter((id) => set.has(id))));
-    const longestBranch = [...canonical].sort((a, b) => b.stops.length - a.stops.length)[0];
-    sharedStops = longestBranch.stops.filter((s) => trunkIds.has(s.stopId));
+    // Exclude short-turn trips (<75% of longest branch) so they don't shrink the trunk.
+    const longestStopCount = Math.max(...canonical.map((b) => b.stops.length));
+    const fullBranches = canonical.filter((b) => b.stops.length >= longestStopCount * 0.75);
+    const trunkBranches = fullBranches.length >= 2 ? fullBranches : canonical;
+    const trunkNameSets = trunkBranches.map((b) => new Set(b.stops.map((s) => s.stopName)));
+    const trunkNames = trunkNameSets.reduce(
+      (acc, set) => new Set([...acc].filter((name) => set.has(name))),
+    );
+    const longestBranch = [...trunkBranches].sort((a, b) => b.stops.length - a.stops.length)[0];
+    sharedStops = longestBranch.stops.filter((s) => trunkNames.has(s.stopName));
     branchSections = canonical
-      .map((b) => ({ label: b.label, stops: b.stops.filter((s) => !trunkIds.has(s.stopId)) }))
+      .map((b) => ({ label: b.label, stops: b.stops.filter((s) => !trunkNames.has(s.stopName)) }))
       .filter((s) => s.stops.length > 0);
   } else {
     // Simple inbound/outbound (e.g. Orange, Blue, Silver Line): subway platforms have

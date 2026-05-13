@@ -76,11 +76,7 @@ export class RoutesService {
     qb.andWhere(
       `(
         (r.short_name NOT ILIKE '%shuttle%' AND r.long_name NOT ILIKE '%shuttle%')
-        OR EXISTS (
-          SELECT 1 FROM trips t
-          JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-          WHERE t.route_id = r.route_id AND t.agency_id = r.agency_id
-        )
+        OR r.has_stop_times = true
       )`,
     );
 
@@ -105,7 +101,7 @@ export class RoutesService {
   }
 
   async findOne(routeId: string, agencyKey: string): Promise<RouteResponse> {
-    const cacheKey = `cache:route:v4:${agencyKey}:${routeId}`;
+    const cacheKey = `cache:route:v5:${agencyKey}:${routeId}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return JSON.parse(cached) as RouteResponse;
 
@@ -116,8 +112,11 @@ export class RoutesService {
       .getOne();
 
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
+    const agencyId = route.agencyId;
 
-    const branchReps = await this.routeRepo.query<
+    // Fetch precomputed route branches — one representative trip per
+    // (direction_id, headsign) chosen during ingestion by stop count DESC.
+    let branchReps = await this.routeRepo.query<
       Array<{
         trip_id: string;
         direction_id: number;
@@ -126,28 +125,42 @@ export class RoutesService {
         stop_count: string;
       }>
     >(
-      `WITH trip_stop_counts AS (
-         SELECT t.trip_id, t.direction_id, t.trip_headsign, t.shape_id,
+      `SELECT trip_id, direction_id, trip_headsign, shape_id, stop_count
+       FROM route_branches
+       WHERE route_id = $1 AND agency_id = $2
+       ORDER BY stop_count DESC`,
+      [routeId, agencyId],
+    );
+
+    // Fallback when route_branches table is empty (e.g. before first ingestion)
+    if (branchReps.length === 0) {
+      branchReps = await this.routeRepo.query<
+        Array<{
+          trip_id: string;
+          direction_id: number;
+          shape_id: string | null;
+          trip_headsign: string | null;
+          stop_count: string;
+        }>
+      >(
+        `SELECT DISTINCT ON (t.direction_id, t.trip_headsign)
+                t.trip_id, t.direction_id, t.trip_headsign, t.shape_id,
                 COUNT(st.stop_id)::int AS stop_count
          FROM trips t
-         JOIN agencies a ON a."agencyId" = t.agency_id
          JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-         WHERE t.route_id = $1 AND a.agency_key = $2
+         WHERE t.route_id = $1 AND t.agency_id = $2
          GROUP BY t.trip_id, t.direction_id, t.trip_headsign, t.shape_id
-       )
-       SELECT DISTINCT ON (direction_id, trip_headsign)
-              trip_id, direction_id, shape_id, trip_headsign, stop_count
-       FROM trip_stop_counts
-       ORDER BY direction_id, trip_headsign, stop_count DESC`,
-      [routeId, agencyKey],
-    );
+         ORDER BY t.direction_id, t.trip_headsign, stop_count DESC`,
+        [routeId, agencyId],
+      );
+    }
 
     if (branchReps.length === 0) throw new NotFoundException(`Route ${routeId} not found`);
 
     const branchTripIds = branchReps.map((b) => b.trip_id);
-    const agencyId = route.agencyId;
     const allStopRows = await this.routeRepo.query<Array<RouteStopResponse & { trip_id: string }>>(
-      `SELECT st.trip_id,
+      `SELECT DISTINCT ON (st.trip_id, st.stop_sequence)
+              st.trip_id,
               s.stop_id AS "stopId",
               s.stop_name AS "stopName",
               ST_Y(s.location::geometry) AS latitude,
@@ -192,18 +205,13 @@ export class RoutesService {
       .getOne();
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
 
-    const branchRep = await this.routeRepo.query<
-      Array<{ shape_id: string | null; stop_count: string }>
-    >(
-      `SELECT t.shape_id, COUNT(st.stop_id)::int AS stop_count
-       FROM trips t
-       JOIN agencies a ON a."agencyId" = t.agency_id
-       JOIN stop_times st ON st.trip_id = t.trip_id AND st.agency_id = t.agency_id
-       WHERE t.route_id = $1 AND a.agency_key = $2
-       GROUP BY t.shape_id
+    const branchRep = await this.routeRepo.query<Array<{ shape_id: string | null }>>(
+      `SELECT shape_id
+       FROM route_branches
+       WHERE route_id = $1 AND agency_id = $2 AND shape_id IS NOT NULL
        ORDER BY stop_count DESC
        LIMIT 1`,
-      [routeId, agencyKey],
+      [routeId, route.agencyId],
     );
     const shapeId = branchRep[0]?.shape_id ?? null;
     if (!shapeId) return null;

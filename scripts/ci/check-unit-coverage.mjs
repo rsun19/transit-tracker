@@ -4,7 +4,7 @@ import path from 'node:path';
 const rootDir = process.cwd();
 
 const requiredThresholds = {
-  backend: 85,
+  stops: 85,
   frontend: 80,
 };
 
@@ -32,11 +32,11 @@ function readBaseline(name) {
   return parsed;
 }
 
-const backendLines = readCoverage('backend/coverage/coverage-summary.json', 'Backend');
+const backendLines = readCoverage('services/stops/coverage/coverage-summary.json', 'Stops');
 const frontendLines = readCoverage('frontend/coverage/coverage-summary.json', 'Frontend');
 
 const checks = [
-  ['backend', backendLines],
+  ['stops', backendLines],
   ['frontend', frontendLines],
 ];
 
@@ -51,13 +51,13 @@ const backendBaseline = readBaseline('BASELINE_BACKEND_LINES');
 const frontendBaseline = readBaseline('BASELINE_FRONTEND_LINES');
 
 if (backendBaseline != null && backendLines < backendBaseline) {
-  throw new Error(`backend coverage regressed: ${backendLines}% < baseline ${backendBaseline}%`);
+  throw new Error(`stops coverage regressed: ${backendLines}% < baseline ${backendBaseline}%`);
 }
 
 if (frontendBaseline != null && frontendLines < frontendBaseline) {
   throw new Error(`frontend coverage regressed: ${frontendLines}% < baseline ${frontendBaseline}%`);
 }
 
-console.log(`backend lines: ${backendLines}% (required >= ${requiredThresholds.backend}%)`);
+console.log(`stops lines: ${backendLines}% (required >= ${requiredThresholds.stops}%)`);
 console.log(`frontend lines: ${frontendLines}% (required >= ${requiredThresholds.frontend}%)`);
 console.log('Unit coverage gate passed.');

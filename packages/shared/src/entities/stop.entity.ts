@@ -48,6 +48,10 @@ export class Stop {
   @Column({ name: 'wheelchair_boarding', type: 'smallint', nullable: true })
   wheelchairBoarding!: number | null;
 
+  @Index()
+  @Column({ name: 'colocated_group_id', type: 'varchar', length: 100, nullable: true })
+  colocatedGroupId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

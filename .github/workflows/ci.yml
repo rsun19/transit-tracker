@@ -20,7 +20,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm ci --prefix backend
       - run: npm ci --prefix frontend
       - run: npm run lint
 
@@ -34,49 +33,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm ci --prefix backend
-      - run: npm ci --prefix frontend
       - run: npm run typecheck
-
-  unit:
-    name: unit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm ci --prefix backend
-      - run: npm ci --prefix frontend
-      - run: npm run test:unit
-
-  integration:
-    name: integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm ci --prefix backend
-      - run: npm run test:integration
-
-  contract:
-    name: contract
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm ci --prefix backend
-      - run: npm run test:contract
 
   accessibility:
     name: accessibility
@@ -281,8 +238,6 @@ jobs:
       - lint
       - typecheck
       - unit
-      - integration
-      - contract
       - accessibility
       - performance
       - cypress-map

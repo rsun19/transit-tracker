@@ -22,9 +22,9 @@ cp .env.example .env
 
 ### Agency Configuration
 
-| Variable             | Default                  | Description                                                                                                  |
-| -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `AGENCY_CONFIG_PATH` | `./config/agencies.json` | Path to the JSON file that lists all transit agencies. Resolved relative to the backend's working directory. |
+| Variable             | Default                  | Description                                                                                                    |
+| -------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `AGENCY_CONFIG_PATH` | `./config/agencies.json` | Path to the JSON file that lists all transit agencies. Resolved relative to the container's working directory. |
 
 ### API Keys
 
@@ -97,7 +97,7 @@ The agency config file is a JSON array. Each element configures one transit prov
 
 ## Application Constants
 
-These values are compiled into the backend. To change them, edit `backend/src/common/constants.ts` and rebuild.
+These values are compiled into the shared library. To change them, edit `packages/shared/src/constants.ts` and rebuild.
 
 | Constant                    | Value   | Description                                                                                         |
 | --------------------------- | ------- | --------------------------------------------------------------------------------------------------- |
@@ -132,13 +132,17 @@ To increase the rate limit for an internal or trusted network, add an `allow` / 
 
 ## Docker Compose Services
 
-| Service    | Internal Port | Exposed Port | Notes                                                                              |
-| ---------- | ------------- | ------------ | ---------------------------------------------------------------------------------- |
-| `nginx`    | 80            | **8080**     | Entry point — routes `/api/` and `/health` to backend, everything else to frontend |
-| `frontend` | 3001          | —            | Next.js 14 server                                                                  |
-| `backend`  | 3000          | —            | NestJS API                                                                         |
-| `worker`   | —             | —            | NestJS ingestion worker (no HTTP)                                                  |
-| `postgres` | 5432          | —            | PostgreSQL 16 + PostGIS 3.4                                                        |
-| `redis`    | 6379          | —            | Redis 7                                                                            |
+| Service     | Internal Port | Exposed Port | Notes                                                                                        |
+| ----------- | ------------- | ------------ | -------------------------------------------------------------------------------------------- |
+| `nginx`     | 80            | **8080**     | Entry point — routes `/api/` to microservices, everything else to frontend                   |
+| `frontend`  | 3001          | —            | Next.js 14 server                                                                            |
+| `agencies`  | 3001          | —            | NestJS microservice — agency config API                                                      |
+| `routes`    | 3002          | —            | NestJS microservice — routes + trips + shapes API                                            |
+| `stops`     | 3003          | —            | NestJS microservice — stops + arrivals + nearby API                                          |
+| `alerts`    | 3004          | —            | NestJS microservice — service alerts API (Redis)                                             |
+| `vehicles`  | 3005          | —            | NestJS microservice — live vehicle positions API (Redis)                                     |
+| `ingestion` | —             | —            | NestJS worker — GTFS static + realtime ingestion, precomputes route_stops and route_branches |
+| `postgres`  | 5432          | —            | PostgreSQL 16 + PostGIS 3.4                                                                  |
+| `redis`     | 6379          | —            | Redis 7                                                                                      |
 
 All services are on the internal `transit-net` bridge network. Only `nginx` exposes a port to the host by default. To expose `postgres` for local queries, add a `ports` entry to the `postgres` service in `docker-compose.yml`.
