@@ -7,7 +7,6 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import fetch from 'node-fetch';
 import * as unzipper from 'unzipper';
 import { pipeline } from 'stream/promises';
 import { createReadStream } from 'fs';
@@ -45,24 +44,6 @@ interface GtfsStop {
   location_type: string;
 }
 
-interface GtfsStopTime {
-  trip_id: string;
-  stop_id: string;
-  stop_sequence: string;
-  arrival_time: string;
-  departure_time: string;
-  stop_headsign: string;
-  pickup_type: string;
-  drop_off_type: string;
-}
-
-interface GtfsShape {
-  shape_id: string;
-  shape_pt_sequence: string;
-  shape_pt_lat: string;
-  shape_pt_lon: string;
-}
-
 interface GtfsCalendar {
   service_id: string;
   monday: string;
@@ -74,6 +55,15 @@ interface GtfsCalendar {
   sunday: string;
   start_date: string;
   end_date: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _fetch: any;
+async function getFetch() {
+  if (!_fetch) {
+    _fetch = (await import('node-fetch')).default;
+  }
+  return _fetch;
 }
 
 @Injectable()
@@ -333,7 +323,7 @@ export class GtfsStaticService {
     const headers: Record<string, string> = {};
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-    const response = await fetch(url, { headers });
+    const response = await (await getFetch())(url, { headers });
     if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     const fileStream = fs.createWriteStream(dest);
     await pipeline(response.body as unknown as NodeJS.ReadableStream, fileStream);
@@ -686,7 +676,6 @@ export class GtfsStaticService {
       routesByStop.get(r.stop_id)!.add(r.route_id);
     }
 
-    const stopMap = new Map(stops.map((s) => [s.stop_id, s]));
     const consumed = new Set<string>();
     const groupAssignments = new Map<string, string | null>();
 

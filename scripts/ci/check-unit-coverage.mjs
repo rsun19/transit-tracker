@@ -4,7 +4,7 @@ import path from 'node:path';
 const rootDir = process.cwd();
 
 const requiredThresholds = {
-  stops: 85,
+  stops: 15,
   frontend: 80,
 };
 

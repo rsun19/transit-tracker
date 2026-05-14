@@ -559,7 +559,6 @@ export class StopsService {
     const routesByStopId = new Map<string, StopRouteRef[]>();
     if (rows.length > 0) {
       const stopIdList = rows.map((r) => r.stop_id);
-      const batchAgencyId = agencyId ?? rows[0].agency_id;
       const routeRows = await this.dataSource.query<
         Array<{
           group_stop_id: string;
