@@ -11,6 +11,7 @@ export interface TripStopResponse {
   stopCode: string | null;
   lat: number;
   lon: number;
+  scheduledArrival: string | null;
   realtimeArrival: string | null;
   scheduledDeparture: string | null;
 }
