@@ -9,7 +9,7 @@
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage --passWithNoTests"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

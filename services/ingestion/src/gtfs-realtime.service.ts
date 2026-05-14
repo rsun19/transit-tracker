@@ -5,8 +5,16 @@ import {
   VEHICLE_CACHE_TTL_S,
   ALERTS_CACHE_TTL_S,
 } from '@transit-tracker/shared';
-import fetch from 'node-fetch';
 import { transit_realtime } from 'gtfs-realtime-bindings';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _fetch: any;
+async function getFetch() {
+  if (!_fetch) {
+    _fetch = (await import('node-fetch')).default;
+  }
+  return _fetch;
+}
 
 @Injectable()
 export class GtfsRealtimeService {
@@ -33,7 +41,9 @@ export class GtfsRealtimeService {
       const headers: Record<string, string> = {};
       if (agency.resolvedApiKey) headers['Authorization'] = `Bearer ${agency.resolvedApiKey}`;
 
-      const response = await fetch(agency.gtfsRealtimeVehiclePositionsUrl!, { headers });
+      const response = await (
+        await getFetch()
+      )(agency.gtfsRealtimeVehiclePositionsUrl!, { headers });
       if (!response.ok) {
         this.logger.warn(`Vehicle positions poll returned ${response.status} for ${agency.key}`);
         return;
@@ -45,8 +55,8 @@ export class GtfsRealtimeService {
       const feed = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
 
       const vehicles = feed.entity
-        .filter((e: any) => e.vehicle)
-        .map((e: any) => ({
+        .filter((e: transit_realtime.IFeedEntity) => e.vehicle)
+        .map((e: transit_realtime.IFeedEntity) => ({
           id: e.vehicle?.vehicle?.id,
           tripId: e.vehicle?.trip?.tripId,
           routeId: e.vehicle?.trip?.routeId,
@@ -73,7 +83,7 @@ export class GtfsRealtimeService {
       const headers: Record<string, string> = {};
       if (agency.resolvedApiKey) headers['Authorization'] = `Bearer ${agency.resolvedApiKey}`;
 
-      const response = await fetch(agency.gtfsRealtimeTripUpdatesUrl!, { headers });
+      const response = await (await getFetch())(agency.gtfsRealtimeTripUpdatesUrl!, { headers });
       if (!response.ok) {
         this.logger.warn(`Trip updates poll returned ${response.status} for ${agency.key}`);
         return;
@@ -131,12 +141,12 @@ export class GtfsRealtimeService {
             descriptionText: entity.alert?.descriptionText?.translation?.[0]?.text ?? '',
             routeIds:
               (entity.alert?.informedEntity ?? [])
-                .filter((e: any) => e.routeId)
-                .map((e: any) => e.routeId!) ?? [],
+                .filter((e: transit_realtime.IEntitySelector) => e.routeId)
+                .map((e: transit_realtime.IEntitySelector) => e.routeId!) ?? [],
             stopIds:
               (entity.alert?.informedEntity ?? [])
-                .filter((e: any) => e.stopId)
-                .map((e: any) => e.stopId!) ?? [],
+                .filter((e: transit_realtime.IEntitySelector) => e.stopId)
+                .map((e: transit_realtime.IEntitySelector) => e.stopId!) ?? [],
             effect: entity.alert?.effect?.toString() ?? '',
           });
         }
