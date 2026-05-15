@@ -91,6 +91,38 @@ export class GtfsStaticService {
       await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
+        // Ensure derived tables exist before operating on them
+        await queryRunner.query(`
+          CREATE TABLE IF NOT EXISTS route_stops (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
+            stop_id VARCHAR(100) NOT NULL,
+            route_id VARCHAR(100) NOT NULL,
+            short_name VARCHAR(50),
+            long_name TEXT,
+            route_type SMALLINT NOT NULL,
+            UNIQUE (agency_id, stop_id, route_id)
+          )
+        `);
+        await queryRunner.query(
+          `CREATE INDEX IF NOT EXISTS idx_route_stops_agency_stop ON route_stops (agency_id, stop_id)`,
+        );
+        await queryRunner.query(`
+          CREATE TABLE IF NOT EXISTS route_branches (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
+            route_id VARCHAR(100) NOT NULL,
+            direction_id SMALLINT,
+            trip_headsign TEXT,
+            trip_id VARCHAR(100) NOT NULL,
+            shape_id VARCHAR(100),
+            stop_count INTEGER NOT NULL
+          )
+        `);
+        await queryRunner.query(
+          `CREATE INDEX IF NOT EXISTS idx_route_branches_agency_route ON route_branches (agency_id, route_id)`,
+        );
+
         // Clean up stale data before re-inserting (idempotent re-ingestion)
         this.logger.debug(`Deleting existing data for agency ${agencyId}...`);
         await queryRunner.query(`DELETE FROM stop_times WHERE agency_id = $1`, [agencyId]);
@@ -176,22 +208,6 @@ export class GtfsStaticService {
           );
 
         // Precompute route_stops — maps every stop to its serving routes
-        this.logger.debug(`Creating route_stops table...`);
-        await queryRunner.query(`
-          CREATE TABLE IF NOT EXISTS route_stops (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-            stop_id VARCHAR(100) NOT NULL,
-            route_id VARCHAR(100) NOT NULL,
-            short_name VARCHAR(50),
-            long_name TEXT,
-            route_type SMALLINT NOT NULL,
-            UNIQUE (agency_id, stop_id, route_id)
-          )
-        `);
-        await queryRunner.query(
-          `CREATE INDEX IF NOT EXISTS idx_route_stops_agency_stop ON route_stops (agency_id, stop_id)`,
-        );
         this.logger.debug(`Populating route_stops from stop_times...`);
         await queryRunner.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
         await queryRunner.query(
@@ -215,22 +231,6 @@ export class GtfsStaticService {
         );
 
         // Precompute route_branches — representative trip per (route, direction, headsign)
-        this.logger.debug(`Creating route_branches table...`);
-        await queryRunner.query(`
-          CREATE TABLE IF NOT EXISTS route_branches (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-            route_id VARCHAR(100) NOT NULL,
-            direction_id SMALLINT,
-            trip_headsign TEXT,
-            trip_id VARCHAR(100) NOT NULL,
-            shape_id VARCHAR(100),
-            stop_count INTEGER NOT NULL
-          )
-        `);
-        await queryRunner.query(
-          `CREATE INDEX IF NOT EXISTS idx_route_branches_agency_route ON route_branches (agency_id, route_id)`,
-        );
         this.logger.debug(`Populating route_branches from trips...`);
         await queryRunner.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
         await queryRunner.query(
