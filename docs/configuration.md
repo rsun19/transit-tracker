@@ -132,17 +132,17 @@ To increase the rate limit for an internal or trusted network, add an `allow` / 
 
 ## Docker Compose Services
 
-| Service     | Internal Port | Exposed Port | Notes                                                                                        |
-| ----------- | ------------- | ------------ | -------------------------------------------------------------------------------------------- |
-| `nginx`     | 80            | **8080**     | Entry point — routes `/api/` to microservices, everything else to frontend                   |
-| `frontend`  | 3001          | —            | Next.js 14 server                                                                            |
-| `agencies`  | 3001          | —            | NestJS microservice — agency config API                                                      |
-| `routes`    | 3002          | —            | NestJS microservice — routes + trips + shapes API                                            |
-| `stops`     | 3003          | —            | NestJS microservice — stops + arrivals + nearby API                                          |
-| `alerts`    | 3004          | —            | NestJS microservice — service alerts API (Redis)                                             |
-| `vehicles`  | 3005          | —            | NestJS microservice — live vehicle positions API (Redis)                                     |
-| `ingestion` | —             | —            | NestJS worker — GTFS static + realtime ingestion, precomputes route_stops and route_branches |
-| `postgres`  | 5432          | —            | PostgreSQL 16 + PostGIS 3.4                                                                  |
-| `redis`     | 6379          | —            | Redis 7                                                                                      |
+| Service     | Internal Port | Exposed Port (prod / dev) | Notes                                                                                        |
+| ----------- | ------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| `nginx`     | 80, 443       | **80, 443** / **3000**    | Entry point — routes `/api/` to microservices, everything else to frontend                   |
+| `frontend`  | 3001          | —                         | Next.js 14 server                                                                            |
+| `agencies`  | 3001          | —                         | NestJS microservice — agency config API                                                      |
+| `routes`    | 3002          | —                         | NestJS microservice — routes + trips + shapes API                                            |
+| `stops`     | 3003          | —                         | NestJS microservice — stops + arrivals + nearby API                                          |
+| `alerts`    | 3004          | —                         | NestJS microservice — service alerts API (Redis)                                             |
+| `vehicles`  | 3005          | —                         | NestJS microservice — live vehicle positions API (Redis)                                     |
+| `ingestion` | —             | —                         | NestJS worker — GTFS static + realtime ingestion, precomputes route_stops and route_branches |
+| `db`        | 5432          | — / 5432                  | PostgreSQL 16 + PostGIS 3.4                                                                  |
+| `cache`     | 6379          | — / 6379                  | Redis 7                                                                                      |
 
-All services are on the internal `transit-net` bridge network. Only `nginx` exposes a port to the host by default. To expose `postgres` for local queries, add a `ports` entry to the `postgres` service in `docker-compose.yml`.
+All services share the Compose project's default network and reach each other by service name. In production only `nginx` exposes ports to the host. `docker-compose.dev.yml` also exposes `db` and `cache` for local queries. To do the same in production, add a `ports` entry to the `db` service in `docker-compose.yml`.
