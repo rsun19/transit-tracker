@@ -10,15 +10,15 @@ cp .env.example .env
 
 ### Database
 
-| Variable       | Default                                                         | Description                                                                                 |
-| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/transit_tracker` | Full PostgreSQL connection string. In Docker Compose the host is `postgres` (service name). |
+| Variable       | Default                                                         | Description                                                                           |
+| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/transit_tracker` | Full PostgreSQL connection string. In Docker Compose the host is `db` (service name). |
 
 ### Cache
 
 | Variable    | Default                  | Description                                                     |
 | ----------- | ------------------------ | --------------------------------------------------------------- |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string. In Docker Compose the host is `redis`. |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection string. In Docker Compose the host is `cache`. |
 
 ### Agency Configuration
 
