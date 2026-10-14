@@ -209,6 +209,14 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - certbot_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
+    # nginx only reads certs at startup; reload every 6h so certificates renewed
+    # by the certbot container are picked up without needing a deploy.
+    command:
+      [
+        '/bin/sh',
+        '-c',
+        'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g "daemon off;"',
+      ]
     ports:
       - '80:80'
       - '443:443'
@@ -238,7 +246,14 @@ services:
       - certbot_certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
     entrypoint: ['/bin/sh']
-    command: ['-c', 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $$!; done']
+    # --webroot overrides the `standalone` authenticator saved by the bootstrap
+    # in /etc/letsencrypt/renewal/*.conf — standalone can't work here because
+    # nginx owns host port 80, so the challenge must be served from the webroot.
+    command:
+      [
+        '-c',
+        'trap exit TERM; while :; do certbot renew --quiet --webroot -w /var/www/certbot; sleep 12h & wait $$!; done',
+      ]
     restart: unless-stopped
 
 volumes:

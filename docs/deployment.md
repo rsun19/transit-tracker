@@ -61,7 +61,7 @@ Set under **Settings → Secrets and variables → Actions → Repository secret
 
 ### Server `.env`
 
-Create `/opt/transit-tracker/.env` from `.env.production.example`. Required variables:
+Create `/opt/transit-tracker/.env` using the repo's `.env.example` as a template. CI never overwrites this file (it only updates `IMAGE_TAG` and `REGISTRY_OWNER`). Required variables:
 
 | Variable            | Set by | Description                                                           |
 | ------------------- | ------ | --------------------------------------------------------------------- |
@@ -89,8 +89,7 @@ sudo chown $USER /opt/transit-tracker
 # Log in to GHCR
 echo <github-pat> | docker login ghcr.io -u <github-username> --password-stdin
 
-# Create .env from template (fill in your values)
-cp .env.production.example /opt/transit-tracker/.env
+# Create .env — paste in the contents of the repo's .env.example and fill in your values
 nano /opt/transit-tracker/.env
 ```
 
@@ -134,7 +133,19 @@ No manual intervention needed. nginx stays up during rolling restarts because `d
 
 ## TLS Renewal
 
-The `certbot` container runs a renewal loop every 12 hours. Certificates auto-renew when they are within 30 days of expiry. No manual action required.
+The `certbot` container runs a renewal loop every 12 hours. Certificates auto-renew when they are within 30 days of expiry. Renewal uses the **webroot** method (nginx serves `/.well-known/acme-challenge/` from the shared `certbot_webroot` volume). The initial bootstrap uses `--standalone` because nginx can't start without a cert, but standalone can't be used for renewals since nginx holds port 80. The renew command passes `--webroot` explicitly to override the saved authenticator.
+
+nginx reloads itself every 6 hours to pick up renewed certs. Each deploy also runs `certbot renew` before restarting nginx.
+
+Let's Encrypt no longer sends expiry reminder emails, so set up an external monitor for certificate expiry (e.g. UptimeRobot or a scheduled `openssl s_client` check).
+
+### Renewing manually
+
+```bash
+cd /opt/transit-tracker
+docker compose run --rm --entrypoint certbot certbot renew --webroot -w /var/www/certbot
+docker compose exec nginx nginx -s reload
+```
 
 The cert is stored in the `certbot_certs` Docker named volume on the server. This volume persists across all deploys.
 
