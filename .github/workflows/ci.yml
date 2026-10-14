@@ -403,6 +403,14 @@ jobs:
                 --agree-tos --no-eff-email
             fi
 
+            # Renew now if within 30 days of expiry (no-op otherwise), using the
+            # ACME webroot served by the currently running nginx. The restart
+            # below then loads the new cert. Non-fatal so a renewal hiccup
+            # doesn't block the deploy.
+            docker compose run --rm --entrypoint certbot certbot renew \
+              --webroot -w /var/www/certbot \
+              || echo "WARNING: certbot renew failed — check output above"
+
             docker compose up -d --remove-orphans
 
             # Reload nginx so it picks up any config changes and re-resolves
