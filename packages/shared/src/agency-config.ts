@@ -8,7 +8,14 @@ const AgencyConfigSchema = z.object({
   gtfsStaticUrl: z.string().url(),
   gtfsRealtimeVehiclePositionsUrl: z.string().url().optional(),
   gtfsRealtimeTripUpdatesUrl: z.string().url().optional(),
+  gtfsRealtimeAlertsUrl: z.string().url().optional(),
   apiKeyEnvVar: z.string().optional(),
+  // HTTP header the API key is sent in (e.g. "x-api-key"). When unset, the key
+  // is never sent: feeds served from a CDN don't need it.
+  apiKeyHeader: z
+    .string()
+    .regex(/^[A-Za-z0-9-]+$/, 'apiKeyHeader must be a valid HTTP header name')
+    .optional(),
 });
 
 export type AgencyConfig = z.infer<typeof AgencyConfigSchema>;
@@ -17,6 +24,12 @@ export interface ResolvedAgency extends AgencyConfig {
   resolvedApiKey: string | undefined;
   hasRealtimePositions: boolean;
   hasRealtimeTripUpdates: boolean;
+  hasRealtimeAlerts: boolean;
+}
+
+export function agencyAuthHeaders(agency: ResolvedAgency): Record<string, string> {
+  if (!agency.apiKeyHeader || !agency.resolvedApiKey) return {};
+  return { [agency.apiKeyHeader]: agency.resolvedApiKey };
 }
 
 export function loadAgencyConfigs(configPath: string): ResolvedAgency[] {
@@ -47,6 +60,7 @@ export function loadAgencyConfigs(configPath: string): ResolvedAgency[] {
       resolvedApiKey,
       hasRealtimePositions: Boolean(config.gtfsRealtimeVehiclePositionsUrl),
       hasRealtimeTripUpdates: Boolean(config.gtfsRealtimeTripUpdatesUrl),
+      hasRealtimeAlerts: Boolean(config.gtfsRealtimeAlertsUrl),
     });
   }
 

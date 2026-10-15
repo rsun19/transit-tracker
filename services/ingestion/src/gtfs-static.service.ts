@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
-import { Agency, STOP_MERGE_RADIUS_DEG } from '@transit-tracker/shared';
+import { Agency, STOP_MERGE_RADIUS_DEG, agencyAuthHeaders } from '@transit-tracker/shared';
 import type { ResolvedAgency } from '@transit-tracker/shared';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
@@ -81,7 +81,7 @@ export class GtfsStaticService {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `gtfs-${agency.key}-`));
     try {
       const zipPath = path.join(tempDir, 'gtfs.zip');
-      await this.downloadFile(agency.gtfsStaticUrl, zipPath, agency.resolvedApiKey);
+      await this.downloadFile(agency.gtfsStaticUrl, zipPath, agencyAuthHeaders(agency));
       await this.extractZip(zipPath, tempDir);
 
       const agencyEntity = await this.upsertAgency(agency);
@@ -319,10 +319,11 @@ export class GtfsStaticService {
     }
   }
 
-  private async downloadFile(url: string, dest: string, apiKey?: string): Promise<void> {
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
+  private async downloadFile(
+    url: string,
+    dest: string,
+    headers: Record<string, string>,
+  ): Promise<void> {
     const response = await (await getFetch())(url, { headers });
     if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     const fileStream = fs.createWriteStream(dest);

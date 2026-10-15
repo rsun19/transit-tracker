@@ -151,7 +151,7 @@ Static GTFS data source of truth. Key design decisions:
 Two uses:
 
 1. **Realtime data** — `vehicles:{agencyKey}` and `alerts:{agencyKey}` STRING keys, 30 s TTL, written by the worker
-2. **API response cache** — `cache:routes:*`, `cache:stop:arrivals:*`, `cache:stops:nearby:*` STRING keys, short TTLs (20–300 s)
+2. **API response cache** — `cache:routes:*`, `cache:arrivals:*`, `cache:stops:nearby:*` STRING keys, short TTLs (5–300 s)
 
 When Redis is unreachable, `CacheService` returns `null` (no throw) and logs a `WARN`. The vehicles endpoint returns a `503`; all other endpoints degrade gracefully to live DB queries or empty arrays.
 
@@ -184,23 +184,44 @@ GtfsStaticService.ingest(agency)
 ### Realtime GTFS-RT Ingestion
 
 ```
-GtfsRealtimeService.poll(agency)
-  1. HTTP GET agency.gtfsRealtimeVehiclePositionsUrl (with API key header if set)
-  2. FeedMessage.decode(buffer)         ← gtfs-realtime-bindings
-  3. Build Set<string> of valid trip IDs from DB
-  4. Filter VehiclePosition entities → discard unknown trip_ids (WARN)
-  5. For each TripUpdate entity:
-       a. trip_id in valid set  → scheduled trip: record delay (first stop_time_update)
-                                  stored as  trip_updates:{agencyKey}  HSET tripId → delaySeconds
-       b. trip_id not in valid set → ADDED / unscheduled trip: collect absolute
-                                  stop arrival timestamps per stop_id
-                                  stored as  added_trips:{agencyKey}   HSET tripId → JSON
-  6. Redis pipeline:
-       SET  vehicles:{key}     JSON(positions)   EX 30
-       SET  alerts:{key}       JSON(alerts)      EX 30
-       HSET trip_updates:{key} {tripId: delay …} EX 90
-       HSET added_trips:{key}  {tripId: data  …} EX 90
-  7. EXEC pipeline
+GtfsRealtimeService.pollAgency(agency)   — VehiclePositions, TripUpdates and Alerts
+                                           feeds are fetched in parallel, each with a
+                                           10 s timeout and the API key header only if
+                                           apiKeyHeader is configured
+  VehiclePositions:
+    SET vehicles:{key} JSON(positions) EX 30
+
+  TripUpdates (parseTripUpdates, a pure function):
+    1. Skip the feed if its header timestamp is > 120 s old, or older than the
+       last one written
+    2. Valid trip_id set comes from StaticLookupService (loaded once per static
+       ingestion, not per poll)
+    3. Per trip (TripRealtime, see packages/shared/src/realtime.ts):
+         CANCELED            → trip_updates   {canceled: true, stops: []}
+         ADDED, or trip_id
+         not in static GTFS  → added_trips    (needs a route_id)
+         DUPLICATED          → added_trips    (keyed trip_id@date#start_time;
+                                               route from static GTFS if absent)
+         otherwise           → trip_updates
+       Hash fields are trip_id@YYYYMMDD (bare trip_id if no start_date), so
+       the same trip_id on two service days doesn't collide.
+       Per stop: arrivalTime and departureTime kept separately; delay is null
+       unless the feed sends one; SKIPPED stops kept with skipped: true;
+       NO_DATA stops kept with no times (the reader uses the schedule there);
+       realtime (possibly child-platform) stop_id kept
+       alongside stop_sequence
+    4. One MULTI: build each hash under {key}:tmp, EXPIRE 60, RENAME over the
+       live key (trip_updates:v2:{key}, added_trips:v2:{key}). Readers never
+       see a missing or partial hash. An empty feed writes nothing, so the
+       keys expire instead of serving stale predictions. Feeds more than
+       120 s old, more than 60 s in the future, or older than the last one
+       written are skipped.
+
+  Alerts (parseAlerts):
+    English translation ("en", then "en-*", then untagged), active periods,
+    informed route/stop/trip ids.
+    stopIds are widened to each informed stop's parent station and child
+    platforms. SET alerts:{key} JSON(alerts) EX 30 (written even when empty)
 ```
 
 ### ADDED Trip Reconciliation (Stop Arrivals)
@@ -211,19 +232,33 @@ appending ADDED trips as extra rows causes each train to appear twice — once f
 static schedule and once from the realtime feed.
 
 `StopsService.getArrivals()` reconciles ADDED trips against the scheduled arrivals
-using a nearest-neighbour match:
+using a nearest-neighbour match. An ADDED trip is at this stop if one of its stops is
+one of the stop's ids, or a child platform of the same parent station.
 
 ```
-For each ADDED trip at this stop (sorted by arrival time ascending):
-  1. Find the closest unmatched scheduled trip with the same routeId AND directionId
-      whose scheduled arrival is within RECONCILE_WINDOW (5 min) of the ADDED time.
+For each ADDED trip at this stop (sorted by predicted time ascending):
+  1. Subway / light rail only (route_type 0 or 1): find the closest unpredicted
+      scheduled trip with the same routeId AND directionId whose scheduled time is
+      within RECONCILE_WINDOW_S (5 min) of the ADDED time. On bus and commuter rail
+      an ADDED trip is real extra service and never hides a scheduled trip.
   2a. Match found →
+        predictedTime        = addedTime
         realtimeDelaySeconds = addedTime − scheduledTime   (negative = running early)
         hasRealtime          = true
         Scheduled slot is marked "consumed" (one-to-one mapping)
   2b. No match (genuinely extra service, e.g. shuttle or unplanned trip) →
-      Append as a new arrival row with hasRealtime = true
+      Append as a new row with status "added" and no scheduled time or delay
 ```
+
+Before reconciliation, `mergeRealtime()` (`services/stops/src/merge-realtime.ts`)
+matches each scheduled row to its `trip_updates:v2` entry: by `stop_sequence`, or for
+unsequenced realtime stops by `stop_id` then parent station. It takes the departure
+prediction (else arrival), computes delay as predicted − scheduled, and flags canceled
+trips, skipped stops, and stops the vehicle has passed. A stop the feed leaves out takes
+the previous listed stop's `delay` field, when the feed sends one. `selectUpcoming()`
+then filters, sorts by effective time, keeps each trip's next visit (loop routes stop
+twice), and applies the limit. The nearby endpoint's `nextArrival` uses the same
+functions, including ADDED-trip reconciliation.
 
 **Why sort ascending first?** On high-frequency routes (e.g. 2-min headways) processing
 order matters. If an ADDED trip at T+1:45 is processed before one at T+0:55, the first

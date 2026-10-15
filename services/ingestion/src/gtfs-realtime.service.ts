@@ -1,11 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CacheService } from './cache/cache.service';
+import { StaticLookupService } from './static-lookup.service';
 import {
   type ResolvedAgency,
+  agencyAuthHeaders,
+  alertsKey,
   VEHICLE_CACHE_TTL_S,
   ALERTS_CACHE_TTL_S,
+  TRIP_UPDATE_CACHE_TTL_S,
+  REALTIME_FEED_MAX_AGE_S,
+  REALTIME_FEED_MAX_FUTURE_S,
+  REALTIME_FETCH_TIMEOUT_MS,
 } from '@transit-tracker/shared';
 import { transit_realtime } from 'gtfs-realtime-bindings';
+import { parseTripUpdates } from './realtime/parse-trip-updates';
+import { parseAlerts } from './realtime/parse-alerts';
+import { writeTripUpdates } from './realtime/write-trip-updates';
+import { optionalEpoch } from './realtime/proto';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _fetch: any;
@@ -19,8 +30,13 @@ async function getFetch() {
 @Injectable()
 export class GtfsRealtimeService {
   private readonly logger = new Logger(GtfsRealtimeService.name);
+  // Header timestamp of the last feed written to Redis, per "<feed>:<agency>".
+  private readonly lastWrittenFeedTimestamp = new Map<string, number>();
 
-  constructor(private readonly cacheService: CacheService) {}
+  constructor(
+    private readonly cacheService: CacheService,
+    private readonly staticLookup: StaticLookupService,
+  ) {}
 
   async pollAgency(agency: ResolvedAgency): Promise<void> {
     const promises: Promise<void>[] = [];
@@ -33,26 +49,90 @@ export class GtfsRealtimeService {
       promises.push(this.pollTripUpdates(agency));
     }
 
+    if (agency.gtfsRealtimeAlertsUrl) {
+      promises.push(this.pollAlerts(agency));
+    }
+
     await Promise.allSettled(promises);
+  }
+
+  private async fetchFeed(
+    agency: ResolvedAgency,
+    url: string,
+    label: string,
+  ): Promise<transit_realtime.FeedMessage | null> {
+    const headers = agencyAuthHeaders(agency);
+    const response = await (
+      await getFetch()
+    )(url, {
+      headers,
+      signal: AbortSignal.timeout(REALTIME_FETCH_TIMEOUT_MS),
+      // node-fetch forwards custom headers across hosts on redirect, so don't
+      // follow redirects when sending the API key; a 3xx fails the poll below.
+      redirect: Object.keys(headers).length > 0 ? 'manual' : 'follow',
+    });
+    if (!response.ok) {
+      this.logger.warn(`${label} poll returned ${response.status} for ${agency.key}`);
+      return null;
+    }
+    const buffer = await response.arrayBuffer();
+    return transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+  }
+
+  /**
+   * Returns false when the feed is too old to write, or older than the one
+   * already written, so a stale CDN response can't overwrite fresher data.
+   */
+  private isFeedFresh(
+    feed: transit_realtime.FeedMessage,
+    agency: ResolvedAgency,
+    label: string,
+  ): boolean {
+    const feedTs = optionalEpoch(feed.header, 'timestamp');
+    if (feedTs === null) return true;
+
+    const ageS = Math.floor(Date.now() / 1000) - feedTs;
+    if (ageS > REALTIME_FEED_MAX_AGE_S) {
+      this.logger.warn(
+        `${label} feed for ${agency.key} is ${ageS}s old (limit ${REALTIME_FEED_MAX_AGE_S}s); not writing it`,
+      );
+      return false;
+    }
+    if (-ageS > REALTIME_FEED_MAX_FUTURE_S) {
+      // Recording a future timestamp would make every later feed look like it
+      // went backwards, blocking all writes until restart.
+      this.logger.warn(
+        `${label} feed for ${agency.key} is ${-ageS}s in the future (limit ${REALTIME_FEED_MAX_FUTURE_S}s); not writing it`,
+      );
+      return false;
+    }
+    const lastTs = this.lastWrittenFeedTimestamp.get(`${label}:${agency.key}`);
+    if (lastTs !== undefined && feedTs < lastTs) {
+      this.logger.warn(
+        `${label} feed for ${agency.key} went backwards (${feedTs} < ${lastTs}); not writing it`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  private markFeedWritten(
+    feed: transit_realtime.FeedMessage,
+    agency: ResolvedAgency,
+    label: string,
+  ) {
+    const feedTs = optionalEpoch(feed.header, 'timestamp');
+    if (feedTs !== null) this.lastWrittenFeedTimestamp.set(`${label}:${agency.key}`, feedTs);
   }
 
   private async pollVehiclePositions(agency: ResolvedAgency): Promise<void> {
     try {
-      const headers: Record<string, string> = {};
-      if (agency.resolvedApiKey) headers['Authorization'] = `Bearer ${agency.resolvedApiKey}`;
-
-      const response = await (
-        await getFetch()
-      )(agency.gtfsRealtimeVehiclePositionsUrl!, { headers });
-      if (!response.ok) {
-        this.logger.warn(`Vehicle positions poll returned ${response.status} for ${agency.key}`);
-        return;
-      }
-
-      const buffer = await response.arrayBuffer();
-
-      // Parse GTFS-RT protobuf
-      const feed = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+      const feed = await this.fetchFeed(
+        agency,
+        agency.gtfsRealtimeVehiclePositionsUrl!,
+        'Vehicle positions',
+      );
+      if (!feed) return;
 
       const vehicles = feed.entity
         .filter((e: transit_realtime.IFeedEntity) => e.vehicle)
@@ -79,100 +159,54 @@ export class GtfsRealtimeService {
   }
 
   private async pollTripUpdates(agency: ResolvedAgency): Promise<void> {
+    const label = 'Trip updates';
     try {
-      const headers: Record<string, string> = {};
-      if (agency.resolvedApiKey) headers['Authorization'] = `Bearer ${agency.resolvedApiKey}`;
+      const feed = await this.fetchFeed(agency, agency.gtfsRealtimeTripUpdatesUrl!, label);
+      if (!feed || !this.isFeedFresh(feed, agency, label)) return;
 
-      const response = await (await getFetch())(agency.gtfsRealtimeTripUpdatesUrl!, { headers });
-      if (!response.ok) {
-        this.logger.warn(`Trip updates poll returned ${response.status} for ${agency.key}`);
+      const lookup = await this.staticLookup.get(agency.key);
+      const parsed = parseTripUpdates(feed, lookup?.trips ?? null);
+
+      const written = await writeTripUpdates(
+        this.cacheService.getClient(),
+        agency.key,
+        parsed.tripUpdates,
+        parsed.addedTrips,
+        TRIP_UPDATE_CACHE_TTL_S,
+      );
+      if (!written) {
+        this.logger.warn(
+          `${label} feed for ${agency.key} had no trips; letting cached data expire`,
+        );
         return;
       }
+      this.markFeedWritten(feed, agency, label);
 
-      const buffer = await response.arrayBuffer();
-
-      const feed = transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
-
-      // trip_updates: hash keyed by trip_id -> { stop_id: { delay, arrivalTime } }
-      const tripUpdates: Record<
-        string,
-        Record<string, { delay: number; arrivalTime?: number }>
-      > = {};
-      // alerts: array
-      const alerts: unknown[] = [];
-      // added_trips: hash keyed by trip_id -> { stops: [...] }
-      const addedTrips: Record<
-        string,
-        {
-          tripId: string;
-          routeId: string;
-          directionId: number | null;
-          headsign: string | null;
-          stops: { stopId: string; arrivalTime: number }[];
-        }
-      > = {};
-
-      for (const entity of feed.entity) {
-        if (entity.tripUpdate?.trip) {
-          const tripId = entity.tripUpdate.trip.tripId;
-          if (!tripId) continue;
-
-          const stopTimeUpdates: Record<string, { delay: number; arrivalTime?: number }> = {};
-          for (const stu of entity.tripUpdate.stopTimeUpdate ?? []) {
-            const stopId = stu.stopId;
-            if (!stopId) continue;
-            const delay = stu.arrival?.delay ?? stu.departure?.delay ?? 0;
-            const arrivalTime = stu.arrival?.time?.toString();
-            stopTimeUpdates[stopId] = {
-              delay,
-              ...(arrivalTime ? { arrivalTime: parseInt(arrivalTime, 10) } : {}),
-            };
-          }
-
-          if (Object.keys(stopTimeUpdates).length > 0) {
-            tripUpdates[tripId] = stopTimeUpdates;
-          }
-        }
-
-        if (entity.alert) {
-          alerts.push({
-            alertId: entity.id,
-            headerText: entity.alert?.headerText?.translation?.[0]?.text ?? '',
-            descriptionText: entity.alert?.descriptionText?.translation?.[0]?.text ?? '',
-            routeIds:
-              (entity.alert?.informedEntity ?? [])
-                .filter((e: transit_realtime.IEntitySelector) => e.routeId)
-                .map((e: transit_realtime.IEntitySelector) => e.routeId!) ?? [],
-            stopIds:
-              (entity.alert?.informedEntity ?? [])
-                .filter((e: transit_realtime.IEntitySelector) => e.stopId)
-                .map((e: transit_realtime.IEntitySelector) => e.stopId!) ?? [],
-            effect: entity.alert?.effect?.toString() ?? '',
-          });
-        }
-      }
-
-      const redis = this.cacheService.getClient();
-
-      if (Object.keys(tripUpdates).length > 0) {
-        await redis.del(`trip_updates:${agency.key}`);
-        for (const [tripId, stops] of Object.entries(tripUpdates)) {
-          await redis.hset(`trip_updates:${agency.key}`, tripId, JSON.stringify(stops));
-        }
-      }
-
-      if (alerts.length > 0) {
-        await redis.set(`alerts:${agency.key}`, JSON.stringify(alerts), 'EX', ALERTS_CACHE_TTL_S);
-      }
-
-      if (Object.keys(addedTrips).length > 0) {
-        await redis.del(`added_trips:${agency.key}`);
-        for (const [tripId, trip] of Object.entries(addedTrips)) {
-          await redis.hset(`added_trips:${agency.key}`, tripId, JSON.stringify(trip));
-        }
-      }
+      const { stats } = parsed;
+      this.logger.log(
+        `${label} for ${agency.key}: ${stats.tripUpdates} trip updates, ${stats.added} added, ${stats.canceled} canceled, ${stats.skippedStops} skipped stops`,
+      );
     } catch (err: unknown) {
-      this.logger.error(`Trip updates poll error for ${agency.key}: ${(err as Error).message}`);
+      this.logger.error(`${label} poll error for ${agency.key}: ${(err as Error).message}`);
+    }
+  }
+
+  private async pollAlerts(agency: ResolvedAgency): Promise<void> {
+    const label = 'Alerts';
+    try {
+      const feed = await this.fetchFeed(agency, agency.gtfsRealtimeAlertsUrl!, label);
+      if (!feed || !this.isFeedFresh(feed, agency, label)) return;
+
+      const lookup = await this.staticLookup.get(agency.key);
+      const alerts = parseAlerts(feed, lookup?.stops ?? null);
+
+      // Written even when empty, so cleared alerts disappear right away.
+      await this.cacheService
+        .getClient()
+        .set(alertsKey(agency.key), JSON.stringify(alerts), 'EX', ALERTS_CACHE_TTL_S);
+      this.markFeedWritten(feed, agency, label);
+    } catch (err: unknown) {
+      this.logger.error(`${label} poll error for ${agency.key}: ${(err as Error).message}`);
     }
   }
 }
