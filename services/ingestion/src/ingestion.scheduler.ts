@@ -5,6 +5,7 @@ import { REALTIME_POLL_INTERVAL_MS } from '@transit-tracker/shared';
 import { AgenciesService } from './agencies/agencies.service';
 import { GtfsStaticService } from './gtfs-static.service';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
+import { StaticLookupService } from './static-lookup.service';
 
 @Injectable()
 export class IngestionScheduler implements OnModuleInit {
@@ -17,6 +18,7 @@ export class IngestionScheduler implements OnModuleInit {
     private readonly agenciesService: AgenciesService,
     private readonly gtfsStaticService: GtfsStaticService,
     private readonly gtfsRealtimeService: GtfsRealtimeService,
+    private readonly staticLookup: StaticLookupService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -46,6 +48,7 @@ export class IngestionScheduler implements OnModuleInit {
       for (const agency of agencies) {
         try {
           await this.gtfsStaticService.ingestAgency(agency);
+          await this.staticLookup.refresh(agency.key);
         } catch (err: unknown) {
           this.logger.error(
             `Static ingestion failed for agency "${agency.key}": ${(err as Error).message}`,
@@ -68,7 +71,7 @@ export class IngestionScheduler implements OnModuleInit {
     try {
       const agencies = this.agenciesService
         .getAllAgencies()
-        .filter((a) => a.hasRealtimePositions || a.hasRealtimeTripUpdates);
+        .filter((a) => a.hasRealtimePositions || a.hasRealtimeTripUpdates || a.hasRealtimeAlerts);
       for (const agency of agencies) {
         try {
           await this.gtfsRealtimeService.pollAgency(agency);

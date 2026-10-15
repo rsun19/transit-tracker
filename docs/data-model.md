@@ -217,12 +217,14 @@ All foreign key relationships cascade `ON DELETE CASCADE` from `agencies`, so dr
 
 ### Realtime keys (written by ingestion worker)
 
-| Key                    | Type     | Content                         | TTL  |
-| ---------------------- | -------- | ------------------------------- | ---- |
-| `vehicles:{agencyKey}` | `STRING` | JSON array of vehicle positions | 30 s |
-| `alerts:{agencyKey}`   | `STRING` | JSON array of service alerts    | 30 s |
+| Key                           | Type     | Content                                                         | TTL  |
+| ----------------------------- | -------- | --------------------------------------------------------------- | ---- |
+| `vehicles:{agencyKey}`        | `STRING` | JSON array of vehicle positions                                 | 30 s |
+| `alerts:{agencyKey}`          | `STRING` | JSON array of service alerts                                    | 30 s |
+| `trip_updates:v2:{agencyKey}` | `HASH`   | `trip_id` → JSON `TripRealtime` for static trips (and canceled) | 60 s |
+| `added_trips:v2:{agencyKey}`  | `HASH`   | `trip_id` → JSON `TripRealtime` for ADDED / unknown trips       | 60 s |
 
-Both keys are written atomically via a Redis pipeline on each realtime poll cycle. If the key expires (worker stopped), the vehicles endpoint returns `503` and the alerts endpoint returns an empty array.
+Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpdatesKey`, `addedTripsKey`, `alertsKey`); don't hand-build them. The two hashes are replaced in one `MULTI` (write to `:tmp`, `EXPIRE`, `RENAME`), so readers never see them missing or half-written. If a key expires (worker stopped or feed down), the vehicles endpoint returns `503`, the alerts endpoint returns an empty array, and arrivals fall back to the schedule.
 
 ### API response cache keys (written by API server)
 

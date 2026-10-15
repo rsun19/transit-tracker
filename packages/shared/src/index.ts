@@ -7,4 +7,10 @@ export { Shape } from './entities/shape.entity';
 export { ServiceCalendar } from './entities/service-calendar.entity';
 export { configSchema, validateConfig, type AppConfig } from './config/configuration';
 export * from './constants';
-export { loadAgencyConfigs, type AgencyConfig, type ResolvedAgency } from './agency-config';
+export {
+  loadAgencyConfigs,
+  agencyAuthHeaders,
+  type AgencyConfig,
+  type ResolvedAgency,
+} from './agency-config';
+export * from './realtime';

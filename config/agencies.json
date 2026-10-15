@@ -6,6 +6,7 @@
     "gtfsStaticUrl": "https://cdn.mbta.com/MBTA_GTFS.zip",
     "gtfsRealtimeVehiclePositionsUrl": "https://cdn.mbta.com/realtime/VehiclePositions.pb",
     "gtfsRealtimeTripUpdatesUrl": "https://cdn.mbta.com/realtime/TripUpdates.pb",
+    "gtfsRealtimeAlertsUrl": "https://cdn.mbta.com/realtime/Alerts.pb",
     "apiKeyEnvVar": "MBTA_API_KEY"
   }
 ]

@@ -17,6 +17,7 @@ import { AgenciesModule } from './agencies/agencies.module';
 import { GtfsStaticService } from './gtfs-static.service';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
 import { IngestionScheduler } from './ingestion.scheduler';
+import { StaticLookupService } from './static-lookup.service';
 
 @Module({
   imports: [
@@ -48,6 +49,6 @@ import { IngestionScheduler } from './ingestion.scheduler';
     CacheModule,
     AgenciesModule,
   ],
-  providers: [GtfsStaticService, GtfsRealtimeService, IngestionScheduler],
+  providers: [GtfsStaticService, GtfsRealtimeService, StaticLookupService, IngestionScheduler],
 })
 export class WorkerModule {}

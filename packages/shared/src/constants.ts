@@ -2,7 +2,13 @@ export const NEARBY_DEFAULT_RADIUS_M = 500;
 export const NEARBY_MAX_RADIUS_M = 5000;
 export const VEHICLE_CACHE_TTL_S = 30;
 export const ALERTS_CACHE_TTL_S = 30;
-export const TRIP_UPDATE_CACHE_TTL_S = 20;
+// About 3x the realtime poll interval, so one or two failed polls don't blank
+// out predictions, but a dead feed stops being served within a minute.
+export const TRIP_UPDATE_CACHE_TTL_S = 60;
+// A GTFS-RT feed whose header timestamp is older than this is treated as stale
+// and not written to Redis.
+export const REALTIME_FEED_MAX_AGE_S = 120;
+export const REALTIME_FETCH_TIMEOUT_MS = 10_000;
 export const API_CACHE_ARRIVALS_TTL_S = 15;
 export const API_CACHE_ROUTES_TTL_S = 3600;
 export const API_CACHE_NEARBY_TTL_S = 45;

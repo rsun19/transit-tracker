@@ -409,21 +409,21 @@ Active service alerts from the GTFS-RT alerts feed, sourced from Redis.
   "alerts": [
     {
       "alertId": "alert-123",
-      "agencyKey": "mbta",
       "cause": "MAINTENANCE",
       "effect": "REDUCED_SERVICE",
       "headerText": "Red Line delays",
       "descriptionText": "Red Line trains are experiencing 10-15 minute delays.",
-      "affectedRoutes": ["Red"],
-      "affectedStops": [],
-      "activePeriod": {
-        "start": "2026-03-28T12:00:00Z",
-        "end": "2026-03-28T18:00:00Z"
-      }
+      "activePeriods": [{ "start": 1774699200, "end": 1774720800 }],
+      "informedEntities": [{ "routeId": "Red", "routeType": null, "stopId": null, "tripId": null }],
+      "routeIds": ["Red"],
+      "stopIds": [],
+      "tripIds": []
     }
   ]
 }
 ```
+
+Only alerts inside one of their `activePeriods` are returned (no periods = always active). Active-period times are epoch seconds; `null` means open-ended. The `stopId` filter matches a parent station or any of its child platforms.
 
 **When no alerts exist or Redis is empty**: returns `{ "alerts": [] }` — does not throw  
 **Cache**: Redis key `alerts:{agencyKey}`, TTL 30 s (written by worker)

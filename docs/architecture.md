@@ -184,23 +184,36 @@ GtfsStaticService.ingest(agency)
 ### Realtime GTFS-RT Ingestion
 
 ```
-GtfsRealtimeService.poll(agency)
-  1. HTTP GET agency.gtfsRealtimeVehiclePositionsUrl (with API key header if set)
-  2. FeedMessage.decode(buffer)         ← gtfs-realtime-bindings
-  3. Build Set<string> of valid trip IDs from DB
-  4. Filter VehiclePosition entities → discard unknown trip_ids (WARN)
-  5. For each TripUpdate entity:
-       a. trip_id in valid set  → scheduled trip: record delay (first stop_time_update)
-                                  stored as  trip_updates:{agencyKey}  HSET tripId → delaySeconds
-       b. trip_id not in valid set → ADDED / unscheduled trip: collect absolute
-                                  stop arrival timestamps per stop_id
-                                  stored as  added_trips:{agencyKey}   HSET tripId → JSON
-  6. Redis pipeline:
-       SET  vehicles:{key}     JSON(positions)   EX 30
-       SET  alerts:{key}       JSON(alerts)      EX 30
-       HSET trip_updates:{key} {tripId: delay …} EX 90
-       HSET added_trips:{key}  {tripId: data  …} EX 90
-  7. EXEC pipeline
+GtfsRealtimeService.pollAgency(agency)   — VehiclePositions, TripUpdates and Alerts
+                                           feeds are fetched in parallel, each with a
+                                           10 s timeout and the API key header only if
+                                           apiKeyHeader is configured
+  VehiclePositions:
+    SET vehicles:{key} JSON(positions) EX 30
+
+  TripUpdates (parseTripUpdates, a pure function):
+    1. Skip the feed if its header timestamp is > 120 s old, or older than the
+       last one written
+    2. Valid trip_id set comes from StaticLookupService (loaded once per static
+       ingestion, not per poll)
+    3. Per trip (TripRealtime, see packages/shared/src/realtime.ts):
+         CANCELED            → trip_updates   {canceled: true, stops: []}
+         ADDED, or trip_id
+         not in static GTFS  → added_trips    (needs a route_id)
+         otherwise           → trip_updates
+       Per stop: arrivalTime and departureTime kept separately; delay is null
+       unless the feed sends one; SKIPPED stops kept with skipped: true;
+       NO_DATA stops dropped; realtime (possibly child-platform) stop_id kept
+       alongside stop_sequence
+    4. One MULTI: build each hash under {key}:tmp, EXPIRE 60, RENAME over the
+       live key (trip_updates:v2:{key}, added_trips:v2:{key}). Readers never
+       see a missing or partial hash. An empty feed writes nothing, so the
+       keys expire instead of serving stale predictions.
+
+  Alerts (parseAlerts):
+    English translation, active periods, informed route/stop/trip ids.
+    stopIds are widened to each informed stop's parent station and child
+    platforms. SET alerts:{key} JSON(alerts) EX 30 (written even when empty)
 ```
 
 ### ADDED Trip Reconciliation (Stop Arrivals)
