@@ -34,10 +34,20 @@
 3. **10c:**
    - multi-stage `npm ci` → `npm prune --omit=dev` (or `npm ci --omit=dev --workspace <svc>` in the final stage);
    - `USER node`, `read_only: true` plus a `tmpfs: /tmp` where possible;
-   - pin `nginx`, `postgis` and `certbot` by digest;
+   - pin **every** image by digest: each Dockerfile `FROM` (including `node:22-alpine` / `node:24-alpine`, in every stage) and every compose `image:` (`nginx`, `postgis`, `redis`, `certbot`). Keep the tag for readability, e.g. `FROM node:22-alpine@sha256:… # 22.x`. Dependabot's docker ecosystem (item 7) keeps the digests current;
    - `mem_limit` per service.
-4. **DB roles:** in `init-db.sql` (or a migration), create `transit_ingest` (DML on the GTFS tables) and `transit_ro` (`SELECT` only). Stops and routes use `transit_ro`. Superuser credentials are only for migrations.
-5. **Per-service env:** replace `env_file: .env` with explicit `environment:` lists per service.
+4. **DB role matrix.** Every service gets an explicit role, and none uses the superuser:
+
+   | Service | Role | Privileges |
+   |---|---|---|
+   | `migrate` (one-shot, PR 08) | `transit_owner` | Owns the schema; all DDL, including trigram and other indexes. Not a superuser |
+   | `ingestion` | `transit_ingest` | `SELECT, INSERT, UPDATE, DELETE` on the GTFS tables; `TEMPORARY` on the database (PR 07 staging); **no DDL**. Index creation lives in migrations (PR 08), not in ingestion. Post-load `ANALYZE` needs `MAINTAIN` (Postgres 17+); otherwise drop it and rely on autovacuum |
+   | `stops`, `routes` | `transit_ro` | `SELECT` only |
+   | `agencies` | none today; `transit_ro` once PR 12 reads `last_ingested_at` | `SELECT` on `agencies` only |
+   | `alerts`, `vehicles`, `frontend`, `nginx` | no DB credentials | Checked: these services don't use the DB |
+
+   Make the roles (as `NOLOGIN` group roles) and their `GRANT`s, plus `ALTER DEFAULT PRIVILEGES` for future tables, a **versioned, idempotent migration**. Don't put them in `init-db.sql`: it only runs when the Postgres volume is first created, so it would never reach the existing prod DB. Create login users with passwords in a deploy step (`scripts/db/ensure-roles.sh`, an idempotent `DO $$ … IF NOT EXISTS … CREATE ROLE … LOGIN PASSWORD …` run through `psql -v`), so secrets never sit in a migration file. Before restarting services, the deploy checks each service's URL with `psql "$STOPS_DATABASE_URL" -c 'select 1'` and similar, and aborts if one fails.
+5. **Per-service env:** replace `env_file: .env` with explicit `environment:` lists per service. Each one gets its own `*_DATABASE_URL` (or none), following the table above. Only `ingestion` gets `MBTA_API_KEY`.
 6. **Dev compose:** bind `127.0.0.1:5432:5432` and `127.0.0.1:6379:6379`.
 7. **CI:** add `npm audit --omit=dev --audit-level=high` as a non-blocking job first, and make it blocking once it's clean. Add Dependabot (`.github/dependabot.yml`) for npm, docker and github-actions.
 

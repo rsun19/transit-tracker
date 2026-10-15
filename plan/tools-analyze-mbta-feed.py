@@ -67,9 +67,18 @@ for tid in want:
             mismatch[(kind, "same-parent" if stop_parent.get(sid) and stop_parent.get(sid)==stop_parent.get(ssid) else "different")] += 1
             if len(examples) < 5: examples.append((kind, tid, seq, "static", ssid, "rt", sid))
         else: mismatch[(kind,"match")] += 1
-        tm = (s.get("arrival") or {}).get("time") or (s.get("departure") or {}).get("time")
+        # Compare like with like: predicted arrival vs scheduled arrival,
+        # predicted departure vs scheduled departure.
+        arr_pred = (s.get("arrival") or {}).get("time")
+        dep_pred = (s.get("departure") or {}).get("time")
+        if arr_pred and arr:
+            tm, sched_str = arr_pred, arr
+        elif dep_pred and dep:
+            tm, sched_str = dep_pred, dep
+        else:
+            tm, sched_str = None, None
         if tm and sd:
-            h,m,sec = map(int, (arr or dep).split(":"))
+            h,m,sec = map(int, sched_str.split(":"))
             base = datetime.datetime.strptime(sd, "%Y%m%d").replace(hour=12, tzinfo=tz) - datetime.timedelta(hours=12)
             sched_ts = base.timestamp() + h*3600 + m*60 + sec
             diff = (tm - sched_ts)/60

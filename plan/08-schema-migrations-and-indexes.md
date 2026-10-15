@@ -2,7 +2,7 @@
 
 **Type:** reliability and performance
 **Touches:** `services/ingestion/src/worker.module.ts`, new `packages/shared/src/migrations/`, `gtfs-static.service.ts` (remove ad-hoc DDL), `stops.service.ts` queries, `docker/init-db.sql`
-**Depends on:** PR 07 (staging tables are created by migration)
+**Depends on:** PR 07 (removes the remaining ingestion-time DDL; its staging tables are session TEMP tables, so they need no migration). PR 10 builds its DB roles on the `migrate` service introduced here
 
 ## Problem
 
@@ -15,17 +15,19 @@
 
 ## Changes
 
-1. Add a TypeORM `migrations` folder and run migrations from the worker on boot (`migrationsRun: true`), with an advisory lock so only the worker migrates. Set `synchronize: false` everywhere.
-2. Baseline migration: the current schema as it exists in prod (generate it from a prod-like DB), plus:
+1. Add a TypeORM `migrations` folder. Run migrations from a one-shot `migrate` compose service (`command: npm run migration:run`, using the schema-owner credentials). The app services wait for it with `depends_on: { migrate: { condition: service_completed_successfully } }`. That way the long-running worker never needs DDL rights (PR 10). Set `synchronize: false` everywhere.
+2. Split the migrations:
+   - **`0001-baseline`**: *only* the schema that already exists in prod (generate it from a prod-like DB). This is the one migration that may be marked as applied on existing databases.
+   - **`0002-indexes-and-tables`**: everything new, which must actually run on every environment:
    - `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then the trigram indexes (instead of ad-hoc DDL);
    - the `route_stops` and `route_branches` tables, with an index on `(stop_id, agency_id)`;
    - `CREATE INDEX ON stops (agency_id, parent_station_id)`;
    - `CREATE INDEX ON stops USING gist ((location::geography))`, *or* change the column type to `geography(Point,4326)`;
-   - the `service_calendar_dates` table from PR 04 and the staging tables from PR 07.
+   - the `service_calendar_dates` table from PR 04, if PR 04 didn't already create it with a migration. PR 07's staging tables are session TEMP tables, so they need no migration.
 3. Delete the DDL from `gtfs-static.service.ts`; ingestion only does DML.
 4. Rewrite the nearby query to compare against the indexed expression exactly. Add `agency_id` to the `route_stops` filters.
 5. `EXPLAIN ANALYZE` before and after for: nearby, stop search, and arrivals at Park Street. Paste the plans into the PR description.
 
 ## Rollout
 
-The first deploy runs the baseline migration against an existing DB. Write it idempotently (`IF NOT EXISTS`), or mark it as already run with `INSERT INTO migrations`, so it doesn't fail on tables that exist. Take a DB snapshot first (`pg_dump`).
+Take a DB snapshot first (`pg_dump`). On an existing DB, register **only `0001-baseline`** as applied (`INSERT INTO migrations`), or write it with `IF NOT EXISTS` so running it does nothing. Then let `0002` and later migrations run normally. Never mark a migration that adds schema as applied, or prod ends up without the new tables and indexes that ingestion and queries depend on. Check afterwards with `\d stops` and `\di` that the trigram, parent_station and geography indexes exist. A fresh DB simply runs all migrations in order.

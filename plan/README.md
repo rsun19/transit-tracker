@@ -8,7 +8,7 @@ MBTA's website and its V3 API read the same prediction source (Concentrate) as `
 
 | Cause | Effect | Fixed in |
 |---|---|---|
-| MBTA never sends `delay` (0 of 34,931 updates), and the app defaults it to 0 | Every realtime row says **"On Time"** | 02, 03, 05 |
+| A missing `delay` is treated as 0, and MBTA sent none in the snapshot (0 of 34,931 updates) | Every realtime row says **"On Time"** | 02, 03, 05 |
 | Only `arrival.time` is read; 880 updates are departure-only | Terminals (Alewife, Forest Hills, South Station, …) show the **schedule** | 02, 03 |
 | Realtime is matched by `stop_id`, and the realtime stop_id is a track/platform child (`Alewife-01`, `NEC-2287-01`) | Predictions missed at terminals and Commuter Rail stations | 02, 03 |
 | Arrivals are kept only if the *scheduled* time is ≥ now − 10 min | Vehicles more than 10 min late **disappear** (2,598 such predictions in the snapshot) | 03 |

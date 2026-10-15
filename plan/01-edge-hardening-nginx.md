@@ -39,4 +39,4 @@
 - From inside the frontend container, `wget -qO- http://nginx:8080/api/v1/agencies` works.
 - `curl -I https://www.trackthemetro.com` shows the new headers and no `Server: nginx/x.y` version.
 - The SSR stop page still renders; the map still loads tiles (CSP).
-- `docker compose exec nginx nginx -t` passes in CI (add this step).
+- The nginx config passes `nginx -t` in CI (add this step). The config references `/etc/letsencrypt/live/...` certs and upstream hostnames, and neither exists in CI, so don't `exec` into a compose service there. Instead, generate a throwaway self-signed cert at that path and run `docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/ci-certs:/etc/letsencrypt:ro" --add-host stops:127.0.0.1 … nginx:<pinned> nginx -t`, adding one `--add-host` per upstream. On the server, use `docker compose exec -T nginx nginx -t` before `nginx -s reload`. `-T` is needed because there's no TTY over SSH.

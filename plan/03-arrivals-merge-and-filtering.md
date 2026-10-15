@@ -10,7 +10,7 @@ These are in `StopsService.getArrivals` (`stops.service.ts:173-450`) and `batchG
 
 1. **Late vehicles vanish.** The SQL keeps a row only if its *scheduled* time is ≥ `now − 10 min` (`:259-266`, `:298`). A bus 15 minutes late gets dropped 10 minutes after its scheduled time, while MBTA still shows it as coming. In the live snapshot, 2,598 stop predictions (2,154 bus, 443 subway) were more than 10 minutes behind schedule. `LIMIT` is also applied in *scheduled* order before the realtime re-sort, so a late trip can be cut off by the limit.
 2. **Realtime lookup misses.** It uses `tripRealtime[row.stop_id]` (`:343`). The realtime `stop_id` differs from the static one at terminals and Commuter Rail tracks (see PR 02 #6). The query doesn't select `stop_sequence`, so there's nothing better to match on.
-3. **Fake "On Time".** `realtimeDelaySeconds` is copied from the feed's `delay`, which MBTA never sends; PR 02 makes it `null`. Delay must be computed as `predicted − scheduled`.
+3. **Fake "On Time".** `realtimeDelaySeconds` is copied from the feed's `delay`, which MBTA didn't send at all in the inspected snapshot; PR 02 makes a missing delay `null`. Delay must be computed as `predicted − scheduled`.
 4. **The sort counts delay twice.** `:441-445` sorts on `realtimeArrival + realtimeDelaySeconds`, but `realtimeArrival` is already the predicted absolute time. `getNearbyStops` does the same at `:647-652`.
 5. **Nearby shows `NaN` delay.** `batchGetNextArrivals` does `parseInt(val, 10)` on a JSON object string (`:742`). That yields `NaN`, and `hasRealtime: delay !== null` then sets `hasRealtime: true`. The nearby API's `nextArrival` never uses the actual prediction and carries a garbage delay. The frontend doesn't render `nextArrival` yet (`api-client.ts:76` only types it), so today the bug is visible only through the API, but it will surface as soon as the nearby page starts showing it. It also filters on scheduled time `>= NOW()`, so a late vehicle still coming doesn't count as "next".
 6. **Canceled and skipped stops aren't hidden** (needs PR 02).
@@ -25,9 +25,10 @@ These are in `StopsService.getArrivals` (`stops.service.ts:173-450`) and `batchG
 4. **Filtering:** drop canceled trips and skipped stops. Drop rows whose *effective* time (prediction if present, otherwise schedule) is more than 30 s in the past. Then sort by effective time and apply the limit.
 5. **Response shape.** Keep `realtimeArrival` for compatibility, and add `scheduledTime`, `predictedTime | null`, `status: 'scheduled'|'on_time'|'late'|'early'|'canceled'|'skipped'`, and `uncertaintySeconds`. This lets the frontend (PR 05) stop deriving status itself. Keep the delay thresholds in one place, on the server.
 6. **ADDED trips:** keep `reconcileAddedTrips`, but make it consume the PR 02 `added_trips` shape. Matching an ADDED trip to an unpredicted *scheduled* trip within ±5 min (`reconcileAddedTrips.ts:1`) can wrongly hide a real scheduled trip on frequent routes. Restrict that matching to subway, where MBTA does replace scheduled trips with ADDED ones, and add it to the specs.
-7. **`batchGetNextArrivals`:** replace it with the same merge logic. Extract `mergeRealtime(rows, realtimeByTrip)` as a pure function used by both paths, and fix the `parseInt` bug as part of that.
-8. Fix the double-counting in both sorts.
-9. Lower the arrivals cache TTL, or split the cache (schedule rows cached for 60 s, realtime merged per request).
+7. **Redis keys:** `getArrivals` (`stops.service.ts:319`, `:384`) and `batchGetNextArrivals` (`:739`) must **both** read `trip_updates:v2:{agency}` and `added_trips:v2:{agency}`, using the shared key builders from PR 02, not hand-built strings. No dual read is needed if PRs 02 and 03 ship in the same deploy. If they don't, have this PR read v2 and fall back to the legacy key until PR 02 is live, then remove the fallback.
+8. **`batchGetNextArrivals`:** replace it with the same merge logic. Extract `mergeRealtime(rows, realtimeByTrip)` as a pure function used by both paths, and fix the `parseInt` bug as part of that.
+9. Fix the double-counting in both sorts.
+10. Lower the arrivals cache TTL, or split the cache (schedule rows cached for 60 s, realtime merged per request).
 
 ## Tests
 

@@ -18,7 +18,7 @@
 
 ## Changes
 
-1. Define a `VehiclePosition` type in `packages/shared` and use it in both ingestion and the frontend: `vehicleId` (`vehicle.id ?? entity.id`), `label` (`vehicle.label`), `updatedAt` (ISO from `timestamp`), `occupancyStatus` as the enum *name*. Add a contract test that serializes the ingestion output and type-checks it against the frontend type.
+1. Define a `VehiclePosition` type in `packages/shared` and use it in both ingestion and the frontend: `vehicleId` (`vehicle.id ?? entity.id`), `label` (`vehicle.label`), `updatedAt`, `occupancyStatus` as the enum *name*. The GTFS-RT `VehiclePosition.timestamp` is **optional** and in **POSIX seconds** (a protobuf `Long`), so `updatedAt = ts != null ? new Date(Number(ts) * 1000).toISOString() : null`. If it's missing, don't invent one: if `feed.header.timestamp` exists, fill a separate field `feedTimestamp` from it. The shared type is `updatedAt: string | null`, and the frontend popup shows "Updated —" when it's null. Add a contract test that serializes the ingestion output and type-checks it against the frontend type, with three cases: timestamp present (seconds → correct ISO), timestamp absent (`null`), and timestamp `0` (treated as absent).
 2. Return `last_ingested_at` from the agencies table (written by PR 07).
 3. Delete the dead code listed above, along with its spec.
 4. nginx: `location = /health { access_log off; return 200 "ok"; }` for nginx's own healthcheck. Proxy service readiness at `/health/ready` only on the internal 8080 server (PR 01).
