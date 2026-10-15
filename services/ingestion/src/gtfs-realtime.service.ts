@@ -60,11 +60,15 @@ export class GtfsRealtimeService {
     url: string,
     label: string,
   ): Promise<transit_realtime.FeedMessage | null> {
+    const headers = agencyAuthHeaders(agency);
     const response = await (
       await getFetch()
     )(url, {
-      headers: agencyAuthHeaders(agency),
+      headers,
       signal: AbortSignal.timeout(REALTIME_FETCH_TIMEOUT_MS),
+      // node-fetch forwards custom headers across hosts on redirect, so don't
+      // follow redirects when sending the API key; a 3xx fails the poll below.
+      redirect: Object.keys(headers).length > 0 ? 'manual' : 'follow',
     });
     if (!response.ok) {
       this.logger.warn(`${label} poll returned ${response.status} for ${agency.key}`);
