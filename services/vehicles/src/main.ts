@@ -1,9 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { VehiclesModule } from './vehicles.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(VehiclesModule, {
+  const app = await NestFactory.create<NestExpressApplication>(VehiclesModule, {
     logger: {
       log: (message: string, context?: string) =>
         process.stdout.write(
@@ -54,6 +55,7 @@ async function bootstrap() {
     },
   });
 
+  app.disable('x-powered-by');
   app.enableCors({ origin: false });
 
   const port = process.env['PORT'] ? parseInt(process.env['PORT'], 10) : 3005;

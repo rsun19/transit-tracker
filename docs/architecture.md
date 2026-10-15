@@ -34,9 +34,15 @@ Transit Tracker is a six-service Docker Compose application that ingests GTFS st
 
 ## Services
 
-### NGINX (`:80/:443`)
+### NGINX (`:80/:443`, internal `:8080`)
 
-Reverse proxy and rate limiter. All traffic enters here. Routes `/api/v1/*` by path prefix to the appropriate microservice:
+Reverse proxy and rate limiter. All traffic enters here. It runs three servers:
+
+- **`:80` (public)**: serves only the ACME challenge (`/.well-known/acme-challenge/`) and 301-redirects everything else to HTTPS.
+- **`:443` (public)**: TLS + HTTP/2, security headers, and rate limits. Routes by path prefix (table below).
+- **`:8080` (internal, not published)**: the same `/api/v1/*` routes with no rate limit, for the frontend's server-side rendering only.
+
+A catch-all `default_server` drops any request whose `Host`/SNI isn't `trackthemetro.com` or `www.trackthemetro.com`.
 
 | Path prefix        | Upstream        |
 | ------------------ | --------------- |
@@ -48,13 +54,16 @@ Reverse proxy and rate limiter. All traffic enters here. Routes `/api/v1/*` by p
 | `/api/v1/agencies` | `agencies:3001` |
 | `/*`               | `frontend:3001` |
 
-- `limit_req_zone` enforces 60 req/min per IP with burst=10
+- `limit_req_zone api` enforces 60 req/min per IP with burst=10 on `/api/v1/*`
+- `limit_req_zone pages` enforces 5 req/s per IP with burst=20 on SSR pages (`/_next/static/` is exempt)
+- Security headers (HSTS, CSP, etc.) live in [`nginx/snippets/security_headers.conf`](../nginx/snippets/security_headers.conf)
+- Upstreams are set through variables, so they are re-resolved through Docker DNS when a container is recreated
 - 429 responses return JSON `{"error":"Rate limit exceeded","statusCode":429}` (not HTML)
 - Config: [`nginx.conf`](../nginx.conf)
 
 ### Frontend (`frontend:3001`)
 
-Next.js 14 App Router application. All pages are client components that fetch from `/api/v1` via the shared `api-client.ts`. Server-side rendering uses `BACKEND_URL=http://nginx:80` for API proxy rewrites.
+Next.js 14 App Router application. All pages are client components that fetch from `/api/v1` via the shared `api-client.ts`. Server-side rendering uses `BACKEND_URL=http://nginx:8080` (the internal-only nginx server) for API proxy rewrites.
 
 | Route                 | Page                                             |
 | --------------------- | ------------------------------------------------ |
