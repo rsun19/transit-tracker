@@ -83,13 +83,15 @@ describe('mergeRealtime()', () => {
     });
   });
 
-  it('prefers the departure prediction over the arrival one (boarding time)', () => {
+  it('shows the arrival prediction, not the departure (as MBTA does)', () => {
+    // Red Line trains dwell ~1 min; showing departure read a minute behind mbta.com.
     const [a] = mergeRealtime(
       [row({ scheduledArrival: NOW + 600, scheduledDeparture: NOW + 630 })],
-      realtime(trip([stop({ arrivalTime: NOW + 610, departureTime: NOW + 640 })])),
+      realtime(trip([stop({ arrivalTime: NOW + 610, departureTime: NOW + 670 })])),
     );
-    expect(a.predictedTime).toBe(iso(NOW + 640));
-    expect(a.scheduledTime).toBe(iso(NOW + 630));
+    expect(a.predictedTime).toBe(iso(NOW + 610));
+    expect(a.realtimeArrival).toBe(iso(NOW + 610));
+    expect(a.scheduledTime).toBe(iso(NOW + 600));
     expect(a.realtimeDelaySeconds).toBe(10);
   });
 
@@ -294,9 +296,9 @@ describe('selectUpcoming()', () => {
   it('keeps only the next visit of a trip that stops here twice (loop route)', () => {
     const merged = mergeRealtime(
       [
-        row({ stopSequence: 5, scheduledDeparture: NOW - 2400 }),
-        row({ stopSequence: 25, scheduledDeparture: NOW + 600 }),
-        row({ stopSequence: 40, scheduledDeparture: NOW + 1800 }),
+        row({ stopSequence: 5, scheduledArrival: NOW - 2400, scheduledDeparture: NOW - 2400 }),
+        row({ stopSequence: 25, scheduledArrival: NOW + 600, scheduledDeparture: NOW + 600 }),
+        row({ stopSequence: 40, scheduledArrival: NOW + 1800, scheduledDeparture: NOW + 1800 }),
       ],
       realtime(
         trip([
@@ -313,9 +315,13 @@ describe('selectUpcoming()', () => {
   it('sorts by effective time (not time + delay) and applies the limit after merging', () => {
     const merged = mergeRealtime(
       [
-        row({ tripId: 'early-sched-late-pred', scheduledDeparture: NOW + 100 }),
-        row({ tripId: 'later-sched', scheduledDeparture: NOW + 400 }),
-        row({ tripId: 'latest-sched', scheduledDeparture: NOW + 800 }),
+        row({
+          tripId: 'early-sched-late-pred',
+          scheduledArrival: NOW + 100,
+          scheduledDeparture: NOW + 100,
+        }),
+        row({ tripId: 'later-sched', scheduledArrival: NOW + 400, scheduledDeparture: NOW + 400 }),
+        row({ tripId: 'latest-sched', scheduledArrival: NOW + 800, scheduledDeparture: NOW + 800 }),
       ],
       realtime(trip([stop({ departureTime: NOW + 600 })], { tripId: 'early-sched-late-pred' })),
     );
@@ -323,6 +329,40 @@ describe('selectUpcoming()', () => {
       'later-sched',
       'early-sched-late-pred',
     ]);
+  });
+
+  it('keeps a train at the platform listed until it departs', () => {
+    const merged = mergeRealtime(
+      [row()],
+      realtime(trip([stop({ arrivalTime: NOW - 50, departureTime: NOW + 15 })])),
+    );
+    const [a] = selectUpcoming(merged, cutoff, 10);
+    expect(a.predictedTime).toBe(iso(NOW - 50));
+
+    const departed = mergeRealtime(
+      [row()],
+      realtime(trip([stop({ arrivalTime: NOW - 100, departureTime: NOW - 40 })])),
+    );
+    expect(selectUpcoming(departed, cutoff, 10)).toEqual([]);
+  });
+
+  it('with an arrival-only prediction, keeps the train listed for its scheduled dwell', () => {
+    // Scheduled 60 s dwell; predicted 2 min late, arrived 50 s ago -> leaves in 10 s.
+    const merged = mergeRealtime(
+      [row({ scheduledArrival: NOW - 170, scheduledDeparture: NOW - 110 })],
+      realtime(trip([stop({ arrivalTime: NOW - 50 })])),
+    );
+    const [a] = selectUpcoming(merged, cutoff, 10);
+    expect(a.predictedTime).toBe(iso(NOW - 50));
+    expect(a.realtimeDelaySeconds).toBe(120);
+  });
+
+  it('keeps a scheduled-only row listed until its scheduled departure', () => {
+    const merged = mergeRealtime(
+      [row({ scheduledArrival: NOW - 60, scheduledDeparture: NOW + 30 })],
+      new Map(),
+    );
+    expect(selectUpcoming(merged, cutoff, 10)).toHaveLength(1);
   });
 });
 
@@ -395,7 +435,19 @@ describe('addedTripStopAt()', () => {
     ]);
     expect(addedTripStopAt(t, stopIds, stationIds, parentOf, NOW)).toEqual({
       predictedTime: NOW + 120,
+      leavesAt: NOW + 120,
       uncertainty: 30,
+    });
+  });
+
+  it('uses the arrival prediction, and keeps a train at the platform until it departs', () => {
+    const t = trip([
+      stop({ stopId: '70061', arrivalTime: NOW - 40, departureTime: NOW + 20, uncertainty: null }),
+    ]);
+    expect(addedTripStopAt(t, stopIds, stationIds, parentOf, NOW - 30)).toEqual({
+      predictedTime: NOW - 40,
+      leavesAt: NOW + 20,
+      uncertainty: null,
     });
   });
 

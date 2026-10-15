@@ -28,9 +28,14 @@ export type ScheduledRow = {
 
 /** An arrival plus the fields needed to filter and sort it; strip with toArrivalResponse. */
 export type MergedArrival = ArrivalResponse & {
-  /** Prediction if present, otherwise schedule; epoch seconds. */
+  /** Time shown: predicted arrival (else departure), otherwise the schedule; epoch seconds. */
   effectiveTime: number;
-  /** Scheduled boarding time, epoch seconds; null for added trips. */
+  /**
+   * When the vehicle leaves this stop: departure if known, else effectiveTime.
+   * A train still at the platform stays listed until then.
+   */
+  leavesAt: number;
+  /** Scheduled arrival (else departure), epoch seconds; null for added trips. */
   scheduledEpoch: number | null;
   /** YYYYMMDD service day of the scheduled row; null for added trips. */
   serviceDate: string | null;
@@ -54,10 +59,12 @@ export function applyPrediction(
   predictedTime: number,
   delaySeconds: number | null,
   uncertaintySeconds: number | null,
+  leavesAt: number = predictedTime,
 ): void {
   arrival.predictedTime = iso(predictedTime);
   arrival.realtimeArrival = iso(predictedTime);
   arrival.effectiveTime = predictedTime;
+  arrival.leavesAt = Math.max(leavesAt, predictedTime);
   arrival.realtimeDelaySeconds = delaySeconds;
   arrival.hasRealtime = true;
   arrival.uncertaintySeconds = uncertaintySeconds;
@@ -137,9 +144,11 @@ function propagatedDelay(stops: StopRealtime[], stopSequence: number): number | 
 }
 
 /**
- * Combines scheduled rows with TripUpdates. The time shown is the one a rider
- * boarding here cares about: departure, else arrival. Delay is computed as
- * predicted - scheduled, never taken from the feed's (usually absent) delay.
+ * Combines scheduled rows with TripUpdates. The time shown is the arrival,
+ * else the departure (first stop), matching what MBTA shows; subway trains
+ * often dwell a minute, so departure would read a minute late. Delay is
+ * computed as predicted - scheduled, never taken from the feed's (usually
+ * absent) delay.
  */
 export function mergeRealtime(
   rows: ScheduledRow[],
@@ -147,7 +156,8 @@ export function mergeRealtime(
   parentOf: ReadonlyMap<string, string> = new Map(),
 ): MergedArrival[] {
   return rows.map((row) => {
-    const scheduled = (row.scheduledDeparture ?? row.scheduledArrival)!;
+    const scheduled = (row.scheduledArrival ?? row.scheduledDeparture)!;
+    const scheduledLeaves = row.scheduledDeparture ?? scheduled;
     const arrival: MergedArrival = {
       tripId: row.tripId,
       routeId: row.routeId,
@@ -163,6 +173,7 @@ export function mergeRealtime(
       status: 'scheduled',
       uncertaintySeconds: null,
       effectiveTime: scheduled,
+      leavesAt: scheduledLeaves,
       scheduledEpoch: scheduled,
       serviceDate: row.serviceDate,
       routeType: row.routeType,
@@ -184,7 +195,9 @@ export function mergeRealtime(
     if (!stop) {
       arrival.passed = hasPassed(trip.stops, row.stopSequence);
       const delay = arrival.passed ? null : propagatedDelay(trip.stops, row.stopSequence);
-      if (delay !== null) applyPrediction(arrival, scheduled + delay, delay, null);
+      if (delay !== null) {
+        applyPrediction(arrival, scheduled + delay, delay, null, scheduledLeaves + delay);
+      }
       return arrival;
     }
     if (stop.skipped) {
@@ -192,23 +205,28 @@ export function mergeRealtime(
       return arrival;
     }
 
-    // Compare like with like: a departure prediction against the scheduled departure.
+    // Compare like with like: an arrival prediction against the scheduled arrival.
     let predicted: number;
     let reference: number;
-    if (stop.departureTime !== null) {
-      predicted = stop.departureTime;
-      reference = row.scheduledDeparture ?? scheduled;
-    } else if (stop.arrivalTime !== null) {
+    let leaves: number;
+    if (stop.arrivalTime !== null) {
       predicted = stop.arrivalTime;
       reference = row.scheduledArrival ?? scheduled;
+      // Arrival-only update: assume the scheduled dwell, shifted by the same delay.
+      leaves = stop.departureTime ?? scheduledLeaves + (predicted - reference);
+    } else if (stop.departureTime !== null) {
+      predicted = stop.departureTime;
+      reference = row.scheduledDeparture ?? scheduled;
+      leaves = predicted;
     } else if (stop.delay !== null) {
       predicted = scheduled + stop.delay;
       reference = scheduled;
+      leaves = scheduledLeaves + stop.delay;
     } else {
       return arrival;
     }
 
-    applyPrediction(arrival, predicted, predicted - reference, stop.uncertainty);
+    applyPrediction(arrival, predicted, predicted - reference, stop.uncertainty, leaves);
     return arrival;
   });
 }
@@ -232,7 +250,7 @@ export function selectUpcoming(
         a.status !== 'skipped' &&
         a.pickupType !== 1 &&
         !a.passed &&
-        a.effectiveTime >= cutoffEpochS,
+        a.leavesAt >= cutoffEpochS,
     )
     .sort((a, b) => a.effectiveTime - b.effectiveTime || a.tripId.localeCompare(b.tripId))
     .filter((a) => {
@@ -245,15 +263,24 @@ export function selectUpcoming(
 }
 
 export function toArrivalResponse(arrival: MergedArrival): ArrivalResponse {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { effectiveTime, scheduledEpoch, serviceDate, routeType, pickupType, passed, ...response } =
-    arrival;
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  const {
+    effectiveTime,
+    leavesAt,
+    scheduledEpoch,
+    serviceDate,
+    routeType,
+    pickupType,
+    passed,
+    ...response
+  } = arrival;
+  /* eslint-enable @typescript-eslint/no-unused-vars */
   return response;
 }
 
 /**
  * Finds where an ADDED trip boards at the requested stop: the first
- * non-skipped stop with a prediction at or after the cutoff whose stop_id is
+ * non-skipped stop that it hasn't left by the cutoff whose stop_id is
  * one of the stop's ids, or whose parent station is the requested station.
  */
 export function addedTripStopAt(
@@ -262,7 +289,7 @@ export function addedTripStopAt(
   stationIds: ReadonlySet<string>,
   parentOf: ReadonlyMap<string, string>,
   cutoffEpochS: number,
-): { predictedTime: number; uncertainty: number | null } | null {
+): { predictedTime: number; leavesAt: number; uncertainty: number | null } | null {
   for (const stop of trip.stops) {
     if (stop.skipped || !stop.stopId) continue;
     const parent = parentOf.get(stop.stopId);
@@ -271,9 +298,14 @@ export function addedTripStopAt(
       stationIds.has(stop.stopId) ||
       (parent !== undefined && stationIds.has(parent));
     if (!atStop) continue;
-    const predictedTime = stop.departureTime ?? stop.arrivalTime;
-    if (predictedTime !== null && predictedTime >= cutoffEpochS) {
-      return { predictedTime, uncertainty: stop.uncertainty };
+    const predictedTime = stop.arrivalTime ?? stop.departureTime;
+    const leavesAt = stop.departureTime ?? stop.arrivalTime;
+    if (predictedTime !== null && leavesAt !== null && leavesAt >= cutoffEpochS) {
+      return {
+        predictedTime,
+        leavesAt: Math.max(leavesAt, predictedTime),
+        uncertainty: stop.uncertainty,
+      };
     }
   }
   return null;

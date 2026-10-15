@@ -44,9 +44,9 @@ export interface ArrivalResponse {
   realtimeDelaySeconds: number | null;
   /** True only when an actual prediction exists. */
   hasRealtime: boolean;
-  /** Scheduled boarding time (departure, else arrival), ISO. Null for added trips. */
+  /** Scheduled arrival (else departure, at a trip's first stop), ISO. Null for added trips. */
   scheduledTime: string | null;
-  /** Predicted boarding time (departure, else arrival), ISO. */
+  /** Predicted arrival (else departure, at a trip's first stop), ISO. */
   predictedTime: string | null;
   status: ArrivalStatus;
   uncertaintySeconds: number | null;
@@ -59,8 +59,10 @@ export interface AddedTripEntry {
     directionId: number | null;
     headsign: string | null;
   };
-  /** Predicted boarding time at this stop, epoch seconds. */
+  /** Predicted arrival (else departure) at this stop, epoch seconds. */
   predictedTime: number;
+  /** Predicted departure (else arrival) at this stop, epoch seconds. */
+  leavesAt: number;
   uncertaintySeconds: number | null;
   routeType: number | null;
   routeShortName: string | null;
