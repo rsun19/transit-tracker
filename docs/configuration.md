@@ -118,13 +118,13 @@ These values are compiled into the shared library. To change them, edit `package
 
 NGINX sits in front of all services and applies per-IP rate limiting on the public HTTPS server. The internal `:8080` server used by frontend SSR is not rate-limited, and is not published.
 
-| Setting       | Value                       | Description                                                                   |
-| ------------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Zone          | `api` — 10 MB shared memory | Stores per-IP state. At ~64 B per IP, 10 MB handles ~160,000 tracked clients. |
-| Rate          | `1 req/s per IP`            | Baseline sustained request rate.                                              |
-| Burst         | `10 requests (nodelay)`     | Allows short bursts up to 10 requests without queuing delay.                  |
-| Excess status | `429`                       | Returns JSON `{"error":"Rate limit exceeded","statusCode":429}`.              |
-| `/health`     | Not rate-limited            | Health check endpoint is excluded from the zone.                              |
+| Setting       | Value                       | Description                                                                    |
+| ------------- | --------------------------- | ------------------------------------------------------------------------------ |
+| Zone          | `api` — 10 MB shared memory | Stores per-IP state. At ~64 B per IP, 10 MB handles ~160,000 tracked clients.  |
+| Rate          | `1 req/s per IP`            | Baseline sustained request rate.                                               |
+| Burst         | `10 requests (nodelay)`     | Allows short bursts up to 10 requests without queuing delay.                   |
+| Excess status | `429`                       | Returns JSON `{"error":"Rate limit exceeded","statusCode":429}`.               |
+| `/health`     | Same `api` zone             | Public `/health` shares the API limit; the container healthcheck uses `:8080`. |
 
 SSR pages (`location /`) use a separate `pages` zone: 5 req/s per IP, burst 20 (nodelay), returning nginx's default 429 page. `/_next/static/` (content-hashed build assets) is exempt.
 

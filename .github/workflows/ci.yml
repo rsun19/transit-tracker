@@ -249,7 +249,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # nginx.conf references the Let's Encrypt cert, which doesn't exist in
-      # CI, so generate a throwaway self-signed one at the same path.
+      # CI, so generate a throwaway self-signed one at the same path. Upstream
+      # hostnames need no --add-host: every proxy_pass uses a variable, which
+      # nginx resolves per request, not at config load.
       - name: Generate throwaway TLS cert
         run: |
           mkdir -p ci-certs/live/www.trackthemetro.com
@@ -263,12 +265,6 @@ jobs:
             -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
             -v "$PWD/ci-certs:/etc/letsencrypt:ro" \
-            --add-host agencies:127.0.0.1 \
-            --add-host routes:127.0.0.1 \
-            --add-host stops:127.0.0.1 \
-            --add-host alerts:127.0.0.1 \
-            --add-host vehicles:127.0.0.1 \
-            --add-host frontend:127.0.0.1 \
             nginx:1.27-alpine nginx -t
       - name: nginx -t (dev config)
         run: |

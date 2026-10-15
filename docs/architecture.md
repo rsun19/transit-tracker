@@ -57,6 +57,7 @@ A catch-all `default_server` drops any request whose `Host`/SNI isn't `trackthem
 - `limit_req_zone api` enforces 60 req/min per IP with burst=10 on `/api/v1/*`
 - `limit_req_zone pages` enforces 5 req/s per IP with burst=20 on SSR pages (`/_next/static/` is exempt)
 - Security headers (HSTS, CSP, etc.) live in [`nginx/snippets/security_headers.conf`](../nginx/snippets/security_headers.conf)
+- The path-prefix → upstream table is a single `map $uri $api_upstream` in `nginx.conf`, shared by the `:443` and `:8080` servers through [`nginx/snippets/api_proxy.conf`](../nginx/snippets/api_proxy.conf). Unknown `/api/v1/*` prefixes and case variants (`/API/V1/...`) return 404
 - Upstreams are set through variables, so they are re-resolved through Docker DNS when a container is recreated
 - 429 responses return JSON `{"error":"Rate limit exceeded","statusCode":429}` (not HTML)
 - Config: [`nginx.conf`](../nginx.conf)
