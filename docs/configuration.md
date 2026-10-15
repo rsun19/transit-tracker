@@ -104,21 +104,25 @@ The agency config file is a JSON array. Each element configures one transit prov
 
 These values are compiled into the shared library. To change them, edit `packages/shared/src/constants.ts` and rebuild.
 
-| Constant                    | Value   | Description                                                                                         |
-| --------------------------- | ------- | --------------------------------------------------------------------------------------------------- |
-| `VEHICLE_CACHE_TTL_S`       | `30`    | TTL (seconds) for `vehicles:{agencyKey}` Redis keys. Vehicles older than this are considered stale. |
-| `ALERTS_CACHE_TTL_S`        | `30`    | TTL (seconds) for `alerts:{agencyKey}` Redis keys.                                                  |
-| `TRIP_UPDATE_CACHE_TTL_S`   | `60`    | TTL (seconds) for `trip_updates:v2:{agencyKey}` and `added_trips:v2:{agencyKey}` Redis keys.        |
-| `REALTIME_FEED_MAX_AGE_S`   | `120`   | A GTFS-RT feed whose header timestamp is older than this is not written to Redis.                   |
-| `REALTIME_FETCH_TIMEOUT_MS` | `10000` | Timeout for each GTFS-RT feed fetch.                                                                |
-| `API_CACHE_ARRIVALS_TTL_S`  | `20`    | TTL for arrival time API responses.                                                                 |
-| `API_CACHE_NEARBY_TTL_S`    | `45`    | TTL for nearby-stops spatial query results.                                                         |
-| `API_CACHE_ROUTES_TTL_S`    | `300`   | TTL for route list and individual route responses.                                                  |
-| `REALTIME_POLL_INTERVAL_MS` | `15000` | Interval between GTFS-Realtime feed polls (milliseconds).                                           |
-| `DEFAULT_SEARCH_LIMIT`      | `20`    | Default page size for list endpoints that support `limit`.                                          |
-| `MAX_SEARCH_LIMIT`          | `100`   | Maximum allowed value for `limit` query parameter.                                                  |
-| `NEARBY_DEFAULT_RADIUS_M`   | `500`   | Default search radius (metres) for `/stops/nearby`.                                                 |
-| `NEARBY_MAX_RADIUS_M`       | `5000`  | Maximum allowed radius for `/stops/nearby`.                                                         |
+| Constant                      | Value   | Description                                                                                         |
+| ----------------------------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `VEHICLE_CACHE_TTL_S`         | `30`    | TTL (seconds) for `vehicles:{agencyKey}` Redis keys. Vehicles older than this are considered stale. |
+| `ALERTS_CACHE_TTL_S`          | `30`    | TTL (seconds) for `alerts:{agencyKey}` Redis keys.                                                  |
+| `TRIP_UPDATE_CACHE_TTL_S`     | `60`    | TTL (seconds) for `trip_updates:v2:{agencyKey}` and `added_trips:v2:{agencyKey}` Redis keys.        |
+| `REALTIME_FEED_MAX_AGE_S`     | `120`   | A GTFS-RT feed whose header timestamp is older than this is not written to Redis.                   |
+| `REALTIME_FETCH_TIMEOUT_MS`   | `10000` | Timeout for each GTFS-RT feed fetch.                                                                |
+| `API_CACHE_ARRIVALS_TTL_S`    | `5`     | TTL for arrival time API responses (short, since they carry live predictions).                      |
+| `API_CACHE_SEARCH_TTL_S`      | `15`    | TTL for stop search results.                                                                        |
+| `ARRIVALS_LATE_WINDOW_S`      | `5400`  | How far back (seconds) arrivals look for scheduled trips that may still be coming late.             |
+| `ARRIVAL_PAST_GRACE_S`        | `30`    | Arrivals whose effective time is further in the past than this are dropped.                         |
+| `ARRIVAL_ON_TIME_THRESHOLD_S` | `60`    | `abs(predicted - scheduled)` below this is `on_time`; otherwise `late` / `early`.                   |
+| `API_CACHE_NEARBY_TTL_S`      | `45`    | TTL for nearby-stops spatial query results.                                                         |
+| `API_CACHE_ROUTES_TTL_S`      | `300`   | TTL for route list and individual route responses.                                                  |
+| `REALTIME_POLL_INTERVAL_MS`   | `15000` | Interval between GTFS-Realtime feed polls (milliseconds).                                           |
+| `DEFAULT_SEARCH_LIMIT`        | `20`    | Default page size for list endpoints that support `limit`.                                          |
+| `MAX_SEARCH_LIMIT`            | `100`   | Maximum allowed value for `limit` query parameter.                                                  |
+| `NEARBY_DEFAULT_RADIUS_M`     | `500`   | Default search radius (metres) for `/stops/nearby`.                                                 |
+| `NEARBY_MAX_RADIUS_M`         | `5000`  | Maximum allowed radius for `/stops/nearby`.                                                         |
 
 ---
 

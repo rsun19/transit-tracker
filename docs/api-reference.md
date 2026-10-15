@@ -242,17 +242,17 @@ Stops within a radius, sorted by distance. Uses PostGIS KNN (`<->` operator).
 
 ### `GET /api/v1/stops/:stopId/arrivals`
 
-Upcoming arrivals for a stop on the current service day, optionally augmented with GTFS-RT delays.
+Upcoming departures for a stop, merged with GTFS-RT predictions. Trips scheduled up to 90 min ago are still listed if a prediction says they are coming; canceled trips, skipped stops, stops the vehicle has passed, and drop-off-only rows (`pickup_type = 1`) are hidden. Rows are sorted by effective time (prediction, else schedule).
 
 **Path parameters**: `stopId` — GTFS `stop_id`
 
 **Query parameters**:
 
-| Param       | Type    | Required | Default | Description                                                 |
-| ----------- | ------- | -------- | ------- | ----------------------------------------------------------- |
-| `agencyKey` | string  | Yes      | —       | Agency owning this stop                                     |
-| `limit`     | integer | No       | `20`    | Max arrivals (max `100`)                                    |
-| `after`     | string  | No       | now     | ISO 8601 time `HH:MM`; return only arrivals after this time |
+| Param       | Type    | Required | Default | Description                                              |
+| ----------- | ------- | -------- | ------- | -------------------------------------------------------- |
+| `agencyKey` | string  | Yes      | —       | Agency owning this stop                                  |
+| `limit`     | integer | No       | `20`    | Max arrivals (max `100`)                                 |
+| `after`     | string  | No       | now     | ISO 8601 timestamp; return only arrivals after this time |
 
 **Response 200**:
 
@@ -261,24 +261,34 @@ Upcoming arrivals for a stop on the current service day, optionally augmented wi
   "stopId": "place-alfcl",
   "stopName": "Alewife",
   "agencyKey": "mbta",
-  "generatedAt": "2026-03-28T14:32:00Z",
-  "arrivals": [
+  "data": [
     {
       "tripId": "63885441",
       "routeId": "Red",
-      "routeShortName": "Red",
+      "routeShortName": null,
+      "routeLongName": "Red Line",
       "headsign": "Ashmont",
-      "scheduledArrival": "14:35:00",
+      "directionId": 0,
+      "scheduledTime": "2026-03-28T14:35:00.000Z",
+      "predictedTime": "2026-03-28T14:37:00.000Z",
+      "realtimeArrival": "2026-03-28T14:37:00.000Z",
       "realtimeDelaySeconds": 120,
-      "realtimeArrival": "14:37:00",
-      "hasRealtime": true
+      "hasRealtime": true,
+      "status": "late",
+      "uncertaintySeconds": 60
     }
   ]
 }
 ```
 
+- Times are the **boarding** time: departure, else arrival.
+- `realtimeArrival` is the effective time (`predictedTime` if present, else `scheduledTime`), kept for compatibility.
+- `realtimeDelaySeconds` is `predictedTime − scheduledTime`; `null` without a prediction.
+- `hasRealtime` is true only when a prediction exists.
+- `status`: `scheduled` (no prediction), `on_time` / `late` / `early` (±60 s threshold, `ARRIVAL_ON_TIME_THRESHOLD_S`), or `added` (extra service with no scheduled trip; `scheduledTime` and `realtimeDelaySeconds` are `null`). `canceled` and `skipped` exist in the type but those rows are currently filtered out.
+
 **Errors**: `404` if stop not found for the given agency  
-**Cache**: 20 s — key `cache:stop:arrivals:{agencyKey}:{stopId}:{minuteBucket}`
+**Cache**: 5 s — key `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}`
 
 ---
 

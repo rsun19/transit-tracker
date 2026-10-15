@@ -7,21 +7,106 @@ import {
   Route,
   API_CACHE_ARRIVALS_TTL_S,
   API_CACHE_NEARBY_TTL_S,
+  API_CACHE_SEARCH_TTL_S,
+  ARRIVAL_PAST_GRACE_S,
+  ARRIVALS_LATE_WINDOW_S,
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
+  addedTripsKey,
+  tripUpdatesKey,
+  type TripRealtime,
 } from '@transit-tracker/shared';
 import { CacheService } from './cache/cache.service';
 import { reconcileAddedTrips } from './reconcileAddedTrips';
 import {
-  StopRouteRef,
-  StopResponse,
-  ArrivalResponse,
-  AddedTripEntry,
-  AddedTrip,
-  ArrivalRow,
-} from './stops.types';
+  addedTripStopAt,
+  mergeRealtime,
+  parseTripRealtime,
+  selectUpcoming,
+  stopIdsNeedingParent,
+  toArrivalResponse,
+  type ScheduledRow,
+} from './merge-realtime';
+import { StopRouteRef, StopResponse, ArrivalResponse, AddedTripEntry } from './stops.types';
+
+// ─── Shared SQL for scheduled stop_times ─────────────────────────────────────
+// Placeholders are passed in because the two arrival queries number their
+// parameters differently.
+
+const todayServicesCte = (agency: string, today: string, yesterday: string) => `
+  today_services AS MATERIALIZED (
+    SELECT sc.service_id, sc.agency_id, cand.d
+    FROM service_calendars sc
+    CROSS JOIN (VALUES (${today}::date), (${yesterday}::date)) AS cand(d)
+    WHERE sc.agency_id = ${agency}
+      AND sc.start_date <= cand.d
+      AND sc.end_date   >= cand.d
+      AND CASE EXTRACT(DOW FROM cand.d)::int
+            WHEN 0 THEN sc.sunday
+            WHEN 1 THEN sc.monday
+            WHEN 2 THEN sc.tuesday
+            WHEN 3 THEN sc.wednesday
+            WHEN 4 THEN sc.thursday
+            WHEN 5 THEN sc.friday
+            WHEN 6 THEN sc.saturday
+          END = true
+  )`;
+
+/** Scheduled boarding time (departure, else arrival) as timestamptz. */
+const scheduledTs = (tz: string) =>
+  `((ts.d + COALESCE(st.departure_time, st.arrival_time))::timestamp AT TIME ZONE ${tz})`;
+
+const scheduledColumns = (tz: string) => `
+  st.trip_id, t.route_id, r.short_name, r.long_name, r.route_type, t.trip_headsign,
+  t.direction_id, st.stop_id, s.parent_station_id, st.stop_sequence, st.pickup_type,
+  to_char(ts.d, 'YYYYMMDD') AS service_date,
+  EXTRACT(EPOCH FROM (ts.d + st.arrival_time)::timestamp AT TIME ZONE ${tz})::float8 AS sched_arrival,
+  EXTRACT(EPOCH FROM (ts.d + st.departure_time)::timestamp AT TIME ZONE ${tz})::float8 AS sched_departure,
+  ${scheduledTs(tz)} AS sched_ts`;
+
+const scheduledJoins = `
+  JOIN trips t           ON t.trip_id     = st.trip_id    AND t.agency_id  = st.agency_id
+  JOIN today_services ts ON ts.service_id = t.service_id  AND ts.agency_id = t.agency_id
+  JOIN routes r          ON r.route_id    = t.route_id    AND r.agency_id  = t.agency_id
+  JOIN stops s           ON s.stop_id     = st.stop_id    AND s.agency_id  = st.agency_id`;
+
+type ScheduledSqlRow = {
+  trip_id: string;
+  route_id: string;
+  short_name: string | null;
+  long_name: string | null;
+  route_type: number | null;
+  trip_headsign: string | null;
+  direction_id: number | null;
+  stop_id: string;
+  parent_station_id: string | null;
+  stop_sequence: number;
+  pickup_type: number | null;
+  service_date: string;
+  sched_arrival: number | null;
+  sched_departure: number | null;
+};
+
+const toScheduledRow = (r: ScheduledSqlRow): ScheduledRow => ({
+  tripId: r.trip_id,
+  routeId: r.route_id,
+  routeShortName: r.short_name,
+  routeLongName: r.long_name,
+  routeType: r.route_type,
+  headsign: r.trip_headsign,
+  directionId: r.direction_id ?? null,
+  stopId: r.stop_id,
+  parentStationId: r.parent_station_id || null,
+  stopSequence: r.stop_sequence,
+  serviceDate: r.service_date,
+  scheduledArrival: r.sched_arrival,
+  scheduledDeparture: r.sched_departure,
+  pickupType: r.pickup_type,
+});
+
+const isoFromEpoch = (epochS: number) => new Date(epochS * 1000).toISOString();
 
 @Injectable()
 export class StopsService {
@@ -166,7 +251,7 @@ export class StopsService {
     data.sort((a, b) => searchResultPriority(a.routes) - searchResultPriority(b.routes));
 
     const result = { data, total };
-    await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ARRIVALS_TTL_S);
+    await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_SEARCH_TTL_S);
     return result;
   }
 
@@ -176,7 +261,8 @@ export class StopsService {
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
   ): Promise<{ data: ArrivalResponse[]; stopId: string; agencyKey: string; stopName: string }> {
-    const cacheKey = `cache:arrivals:v5:${agencyKey}:${stopId}:${limit}:${after ?? 'now'}`;
+    const cappedLimit = Math.min(limit, MAX_SEARCH_LIMIT);
+    const cacheKey = `cache:arrivals:v6:${agencyKey}:${stopId}:${cappedLimit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
     if (cached)
       return JSON.parse(cached) as {
@@ -210,7 +296,11 @@ export class StopsService {
     const parentStationId = stopInfo?.parent_station_id ?? null;
 
     let effectiveStopIds: string[];
+    // Parent station(s) the requested stop belongs to; realtime child
+    // platforms (e.g. "Alewife-01") are matched through these.
+    const stationIds = new Set<string>();
     if (parentStationId) {
+      stationIds.add(parentStationId);
       // Child platform — find siblings that have stop_times via route_stops
       const siblingRows = await this.dataSource.query<Array<{ stop_id: string }>>(
         `SELECT s.stop_id FROM stops s
@@ -228,6 +318,7 @@ export class StopsService {
         [stopId, agencyId],
       );
       if (childRows.length > 0) {
+        stationIds.add(stopId);
         effectiveStopIds = childRows.map((r) => r.stop_id);
       } else {
         // Standalone stop — use precomputed colocated_group_id if available
@@ -255,198 +346,169 @@ export class StopsService {
     const todayStr = dateFmt.format(new Date());
     const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
 
-    let afterTimestamp: string;
-    if (after) {
-      const afterDate = new Date(after);
-      afterTimestamp = !isNaN(afterDate.getTime())
-        ? afterDate.toISOString()
-        : new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    } else {
-      afterTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    }
+    // Without `after`, look back ARRIVALS_LATE_WINDOW_S so trips running late
+    // are still candidates; the merge drops the ones that have really gone.
+    const nowS = Date.now() / 1000;
+    const afterMs = after ? new Date(after).getTime() : NaN;
+    const cutoffS = !isNaN(afterMs) ? afterMs / 1000 : nowS - ARRIVAL_PAST_GRACE_S;
+    const windowStartS = !isNaN(afterMs) ? cutoffS : nowS - ARRIVALS_LATE_WINDOW_S;
 
-    const rows = await this.dataSource.query<Array<ArrivalRow>>(
-      `WITH today_services AS MATERIALIZED (
-         SELECT sc.service_id, sc.agency_id, cand.d
-         FROM service_calendars sc
-         CROSS JOIN (VALUES ($3::date), ($4::date)) AS cand(d)
-         WHERE sc.agency_id = $2
-           AND sc.start_date <= cand.d
-           AND sc.end_date   >= cand.d
-           AND CASE EXTRACT(DOW FROM cand.d)::int
-                 WHEN 0 THEN sc.sunday
-                 WHEN 1 THEN sc.monday
-                 WHEN 2 THEN sc.tuesday
-                 WHEN 3 THEN sc.wednesday
-                 WHEN 4 THEN sc.thursday
-                 WHEN 5 THEN sc.friday
-                 WHEN 6 THEN sc.saturday
-               END = true
+    // Late candidates (scheduled before the cutoff) are bounded by the window.
+    // Upcoming rows get a generous limit; the real limit is applied after the
+    // realtime merge, since predictions can reorder them.
+    const sqlRows = await this.dataSource.query<ScheduledSqlRow[]>(
+      `WITH ${todayServicesCte('$2', '$3', '$4')},
+       candidates AS (
+         SELECT DISTINCT ON (st.trip_id, ts.d) ${scheduledColumns('$5')}
+         FROM stop_times st
+         ${scheduledJoins}
+         WHERE st.stop_id = ANY($1) AND st.agency_id = $2
+           AND ${scheduledTs('$5')} >= $6::timestamptz
+         ORDER BY st.trip_id, ts.d, sched_ts ASC
        )
-      SELECT trip_id, route_id, short_name, long_name, trip_headsign, direction_id, arrival_time, stop_id
-      FROM (
-        SELECT DISTINCT ON (t.trip_id, ts.d)
-          st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-          t.direction_id,
-          ((ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
-          st.stop_id
-        FROM stop_times st
-        JOIN trips t         ON t.trip_id    = st.trip_id    AND t.agency_id  = st.agency_id
-        JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
-        JOIN routes r        ON r.route_id   = t.route_id    AND r.agency_id  = t.agency_id
-        WHERE st.stop_id = ANY($1) AND st.agency_id = $2
-          AND (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 >= $6::timestamp
-        ORDER BY t.trip_id, ts.d, (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 ASC
-      ) deduped
-      ORDER BY arrival_time ASC
-      LIMIT $7`,
+       (SELECT * FROM candidates WHERE sched_ts < $7::timestamptz)
+       UNION ALL
+       (SELECT * FROM candidates WHERE sched_ts >= $7::timestamptz ORDER BY sched_ts ASC LIMIT $8)`,
       [
         effectiveStopIds,
         agencyId,
         todayStr,
         yesterdayStr,
         timezone,
-        afterTimestamp,
-        Math.min(limit, MAX_SEARCH_LIMIT),
+        isoFromEpoch(windowStartS),
+        isoFromEpoch(cutoffS),
+        cappedLimit * 3,
       ],
     );
+    const rows = sqlRows.map(toScheduledRow);
 
-    const realtimeMap = new Map<string, Record<string, { arrivalTime?: number; delay?: number }>>();
-    if (rows.length > 0) {
-      try {
-        const redis = this.cacheService.getClient();
-        const tripIds = rows.map((r) => r.trip_id);
-        const realtimeValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
-        tripIds.forEach((tripId, i) => {
-          const val = realtimeValues[i];
-          if (val !== null) {
-            try {
-              const parsed = JSON.parse(val);
-              if (parsed && typeof parsed === 'object') {
-                realtimeMap.set(tripId, parsed);
-              }
-            } catch {
-              const delay = parseInt(val, 10);
-              if (!isNaN(delay)) {
-                realtimeMap.set(tripId, { legacy: { delay } });
-              }
-            }
-          }
-        });
-      } catch {
-        /* Redis unavailable */
-      }
-    }
+    const [realtimeByTrip, addedTrips] = await Promise.all([
+      this.loadTripRealtime(
+        agencyKey,
+        rows.map((r) => r.tripId),
+      ),
+      this.loadAddedTrips(agencyKey),
+    ]);
 
-    const data: ArrivalResponse[] = rows.map((row) => {
-      const tripRealtime = realtimeMap.get(row.trip_id) ?? {};
-      const stopRealtime = tripRealtime[row.stop_id] ?? null;
-      let realtimeArrival: string = row.arrival_time;
-      let realtimeArrivalSeconds: number = new Date(row.arrival_time).getTime() / 1000;
-      let realtimeDelay: number | null = null;
-      let hasRealtime = false;
-      if (stopRealtime) {
-        const rt = stopRealtime as {
-          arrivalTime?: number;
-          delay?: number;
-          realtimeArrival?: string;
+    const effectiveStopIdSet = new Set(effectiveStopIds);
+    const parentOf = await this.loadParentStations(agencyId, [
+      ...stopIdsNeedingParent(realtimeByTrip.values()),
+      ...addedTrips.flatMap((t) =>
+        t.stops
+          .map((s) => s.stopId)
+          .filter((id): id is string => !!id && !effectiveStopIdSet.has(id)),
+      ),
+    ]);
+
+    const merged = mergeRealtime(rows, realtimeByTrip, parentOf);
+
+    const pendingAdded = addedTrips.flatMap((trip) => {
+      const at = addedTripStopAt(trip, effectiveStopIdSet, stationIds, parentOf, cutoffS);
+      return at ? [{ trip, ...at }] : [];
+    });
+    if (pendingAdded.length > 0) {
+      const addedRouteIdList = [...new Set(pendingAdded.map(({ trip }) => trip.routeId!))];
+      const [routeRows, headsignRows] = await Promise.all([
+        this.dataSource.query<
+          Array<{
+            route_id: string;
+            short_name: string | null;
+            long_name: string | null;
+            route_type: number;
+          }>
+        >(
+          `SELECT route_id, short_name, long_name, route_type FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
+          [agencyId, addedRouteIdList],
+        ),
+        this.dataSource.query<
+          Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
+        >(
+          `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
+           FROM trips WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
+           ORDER BY route_id, direction_id, trip_headsign`,
+          [agencyId, addedRouteIdList],
+        ),
+      ]);
+
+      const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
+      const headsignMap = new Map(
+        headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
+      );
+
+      const entries: AddedTripEntry[] = pendingAdded.map(({ trip, predictedTime, uncertainty }) => {
+        const route = routeMap.get(trip.routeId!);
+        return {
+          trip: {
+            tripId: trip.tripId,
+            routeId: trip.routeId!,
+            directionId: trip.directionId,
+            headsign: null,
+          },
+          predictedTime,
+          uncertaintySeconds: uncertainty,
+          routeType: route?.route_type ?? null,
+          routeShortName: route?.short_name ?? null,
+          routeLongName: route?.long_name ?? null,
+          headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
         };
-        if (typeof rt.realtimeArrival === 'string') {
-          realtimeArrival = rt.realtimeArrival;
-          realtimeArrivalSeconds = new Date(rt.realtimeArrival).getTime() / 1000;
-          hasRealtime = true;
-        } else if (rt.arrivalTime) {
-          realtimeArrival = new Date(rt.arrivalTime * 1000).toISOString();
-          realtimeArrivalSeconds = rt.arrivalTime;
-          hasRealtime = true;
-        }
-        if (typeof rt.delay === 'number') {
-          realtimeDelay = rt.delay;
-          hasRealtime = true;
-        }
-      }
-      return {
-        tripId: row.trip_id,
-        routeId: row.route_id,
-        routeShortName: row.short_name,
-        routeLongName: row.long_name,
-        headsign: row.trip_headsign,
-        realtimeArrival,
-        realtimeArrivalSeconds,
-        realtimeDelaySeconds: realtimeDelay,
-        hasRealtime,
-        directionId: row.direction_id ?? null,
-      };
-    });
+      });
 
-    try {
-      const redis = this.cacheService.getClient();
-      const addedRaw = await redis.hgetall(`added_trips:${agencyKey}`);
-      if (addedRaw && Object.keys(addedRaw).length > 0) {
-        const nowMs = Date.now();
-        const effectiveStopIdSet = new Set(effectiveStopIds);
-        const pendingAdded: Array<{ trip: AddedTrip; arrivalTime: number }> = [];
-        const addedRouteIds = new Set<string>();
-
-        for (const raw of Object.values(addedRaw)) {
-          const trip: AddedTrip = JSON.parse(raw);
-          for (const stop of trip.stops) {
-            if (effectiveStopIdSet.has(stop.stopId) && stop.arrivalTime * 1000 > nowMs) {
-              addedRouteIds.add(trip.routeId);
-              pendingAdded.push({ trip, arrivalTime: stop.arrivalTime });
-              break;
-            }
-          }
-        }
-
-        if (pendingAdded.length > 0) {
-          const addedRouteIdList = [...addedRouteIds];
-          const [routeRows, headsignRows] = await Promise.all([
-            this.dataSource.query<
-              Array<{ route_id: string; short_name: string | null; long_name: string | null }>
-            >(
-              `SELECT route_id, short_name, long_name FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
-              [agencyId, addedRouteIdList],
-            ),
-            this.dataSource.query<
-              Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
-            >(
-              `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
-               FROM trips WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
-               ORDER BY route_id, direction_id, trip_headsign`,
-              [agencyId, addedRouteIdList],
-            ),
-          ]);
-
-          const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
-          const headsignMap = new Map(
-            headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
-          );
-
-          const entries: AddedTripEntry[] = pendingAdded.map(({ trip, arrivalTime }) => ({
-            trip,
-            arrivalTime,
-            routeShortName: routeMap.get(trip.routeId)?.short_name ?? null,
-            routeLongName: routeMap.get(trip.routeId)?.long_name ?? null,
-            headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
-          }));
-
-          reconcileAddedTrips(data, entries);
-        }
-      }
-    } catch {
-      /* Redis unavailable */
+      reconcileAddedTrips(merged, entries);
     }
 
-    data.sort((a, b) => {
-      const aEff = new Date(a.realtimeArrival).getTime() / 1000 + (a.realtimeDelaySeconds ?? 0);
-      const bEff = new Date(b.realtimeArrival).getTime() / 1000 + (b.realtimeDelaySeconds ?? 0);
-      return aEff - bEff;
-    });
+    const data = selectUpcoming(merged, cutoffS, cappedLimit).map(toArrivalResponse);
 
     const result = { data, stopId, agencyKey, stopName };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ARRIVALS_TTL_S);
     return result;
+  }
+
+  /** Reads trip_updates:v2 for the given trips. Missing or malformed entries are skipped. */
+  private async loadTripRealtime(
+    agencyKey: string,
+    tripIds: string[],
+  ): Promise<Map<string, TripRealtime>> {
+    const result = new Map<string, TripRealtime>();
+    const unique = [...new Set(tripIds)];
+    if (unique.length === 0) return result;
+    try {
+      const values = await this.cacheService
+        .getClient()
+        .hmget(tripUpdatesKey(agencyKey), ...unique);
+      unique.forEach((tripId, i) => {
+        const trip = parseTripRealtime(values[i]);
+        if (trip) result.set(tripId, trip);
+      });
+    } catch {
+      /* Redis unavailable — fall back to the schedule */
+    }
+    return result;
+  }
+
+  /** Reads added_trips:v2. Trips without a route can't be placed and are skipped. */
+  private async loadAddedTrips(agencyKey: string): Promise<TripRealtime[]> {
+    try {
+      const raw = await this.cacheService.getClient().hgetall(addedTripsKey(agencyKey));
+      return Object.values(raw ?? {})
+        .map(parseTripRealtime)
+        .filter((t): t is TripRealtime => t !== null && !!t.routeId);
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadParentStations(
+    agencyId: string,
+    stopIds: string[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Set(stopIds)];
+    if (unique.length === 0) return new Map();
+    const rows = await this.dataSource.query<Array<{ stop_id: string; parent_station_id: string }>>(
+      `SELECT stop_id, parent_station_id FROM stops
+       WHERE agency_id = $1 AND stop_id = ANY($2) AND parent_station_id IS NOT NULL AND parent_station_id != ''`,
+      [agencyId, unique],
+    );
+    return new Map(rows.map((r) => [r.stop_id, r.parent_station_id]));
   }
 
   async getRoutesForStop(
@@ -640,17 +702,17 @@ export class StopsService {
       allRoutes.sort((a, b) => (a.shortName ?? '').localeCompare(b.shortName ?? ''));
       merged.routes = allRoutes;
 
+      // realtimeArrival is already the effective (predicted, else scheduled) time.
       let bestArrival: ArrivalResponse | null = null;
       for (const s of group) {
         const arr = nextArrivalByStopId.get(s.stopId) ?? null;
-        if (arr) {
-          const arrTime =
-            new Date(arr.realtimeArrival).getTime() / 1000 + (arr.realtimeDelaySeconds ?? 0);
-          const bestTime = bestArrival
-            ? new Date(bestArrival.realtimeArrival).getTime() / 1000 +
-              (bestArrival.realtimeDelaySeconds ?? 0)
-            : Infinity;
-          if (!bestArrival || arrTime < bestTime) bestArrival = arr;
+        if (
+          arr &&
+          (!bestArrival ||
+            new Date(arr.realtimeArrival).getTime() <
+              new Date(bestArrival.realtimeArrival).getTime())
+        ) {
+          bestArrival = arr;
         }
       }
       mergedData.push({ ...merged, nextArrival: bestArrival });
@@ -674,32 +736,14 @@ export class StopsService {
     const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
     const todayStr = dateFmt.format(new Date());
     const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
+    const nowS = Date.now() / 1000;
+    const cutoffS = nowS - ARRIVAL_PAST_GRACE_S;
 
-    const rows = await this.dataSource.query<
-      Array<{
-        stop_id: string;
-        trip_id: string;
-        route_id: string;
-        short_name: string | null;
-        long_name: string | null;
-        trip_headsign: string | null;
-        arrival_time: string;
-        direction_id: number | null;
-      }>
-    >(
-      `WITH today_services AS MATERIALIZED (
-         SELECT sc.service_id, sc.agency_id, cand.d
-         FROM service_calendars sc
-         CROSS JOIN (VALUES ($3::date), ($4::date)) AS cand(d)
-         WHERE sc.agency_id = $2
-           AND sc.start_date <= cand.d AND sc.end_date >= cand.d
-           AND CASE EXTRACT(DOW FROM cand.d)::int
-                 WHEN 0 THEN sc.sunday WHEN 1 THEN sc.monday
-                 WHEN 2 THEN sc.tuesday WHEN 3 THEN sc.wednesday
-                 WHEN 4 THEN sc.thursday WHEN 5 THEN sc.friday
-                 WHEN 6 THEN sc.saturday
-               END = true
-       ),
+    // Per platform: the most recent trips scheduled in the late window (they
+    // may still be coming) plus the next few scheduled ones. Same merge rules
+    // as getArrivals.
+    const sqlRows = await this.dataSource.query<Array<ScheduledSqlRow & { group_stop_id: string }>>(
+      `WITH ${todayServicesCte('$2', '$3', '$4')},
        expanded_stops AS MATERIALIZED (
          SELECT stop_id AS parent_stop_id, stop_id AS effective_stop_id
          FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
@@ -707,59 +751,59 @@ export class StopsService {
          SELECT parent_station_id AS parent_stop_id, stop_id AS effective_stop_id
          FROM stops WHERE parent_station_id = ANY($1) AND agency_id = $2
        )
-       SELECT DISTINCT ON (es.parent_stop_id)
-              es.parent_stop_id AS stop_id,
-              dep.trip_id, dep.route_id, dep.short_name, dep.long_name,
-              dep.trip_headsign, dep.direction_id, dep.arrival_time
+       SELECT es.parent_stop_id AS group_stop_id, dep.*
        FROM expanded_stops es
-       LEFT JOIN LATERAL (
-         SELECT st.trip_id, t.route_id, r.short_name, r.long_name, t.trip_headsign,
-                t.direction_id,
-                ((ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 AT TIME ZONE 'UTC')::text || 'Z' AS arrival_time,
-                (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 AS eff_ts
-         FROM stop_times st
-         JOIN trips t         ON t.trip_id    = st.trip_id  AND t.agency_id = st.agency_id
-         JOIN today_services ts ON ts.service_id = t.service_id AND ts.agency_id = t.agency_id
-         JOIN routes r        ON r.route_id   = t.route_id  AND r.agency_id  = t.agency_id
-         WHERE st.stop_id = es.effective_stop_id AND st.agency_id = $2
-           AND (ts.d + st.arrival_time)::timestamp AT TIME ZONE $5 >= NOW()
-         ORDER BY eff_ts ASC
-         LIMIT 1
-       ) dep ON true
-       WHERE dep.trip_id IS NOT NULL
-       ORDER BY es.parent_stop_id, dep.eff_ts ASC`,
-      [stopIds, agencyId, todayStr, yesterdayStr, timezone],
+       CROSS JOIN LATERAL (
+         (SELECT ${scheduledColumns('$5')}
+          FROM stop_times st
+          ${scheduledJoins}
+          WHERE st.stop_id = es.effective_stop_id AND st.agency_id = $2
+            AND ${scheduledTs('$5')} >= $6::timestamptz
+            AND ${scheduledTs('$5')} < $7::timestamptz
+          ORDER BY sched_ts DESC
+          LIMIT 10)
+         UNION ALL
+         (SELECT ${scheduledColumns('$5')}
+          FROM stop_times st
+          ${scheduledJoins}
+          WHERE st.stop_id = es.effective_stop_id AND st.agency_id = $2
+            AND ${scheduledTs('$5')} >= $7::timestamptz
+          ORDER BY sched_ts ASC
+          LIMIT 3)
+       ) dep`,
+      [
+        stopIds,
+        agencyId,
+        todayStr,
+        yesterdayStr,
+        timezone,
+        isoFromEpoch(nowS - ARRIVALS_LATE_WINDOW_S),
+        isoFromEpoch(cutoffS),
+      ],
     );
 
-    const delayMap = new Map<string, number>();
-    if (rows.length > 0) {
-      try {
-        const redis = this.cacheService.getClient();
-        const tripIds = rows.map((r) => r.trip_id);
-        const delayValues = await redis.hmget(`trip_updates:${agencyKey}`, ...tripIds);
-        tripIds.forEach((tripId, i) => {
-          const val = delayValues[i];
-          if (val !== null) delayMap.set(tripId, parseInt(val, 10));
-        });
-      } catch {
-        /* Redis unavailable */
-      }
-    }
+    const rows = sqlRows.map(toScheduledRow);
+    const realtimeByTrip = await this.loadTripRealtime(
+      agencyKey,
+      rows.map((r) => r.tripId),
+    );
+    const parentOf = await this.loadParentStations(
+      agencyId,
+      stopIdsNeedingParent(realtimeByTrip.values()),
+    );
+    const merged = mergeRealtime(rows, realtimeByTrip, parentOf);
+
+    const byGroup = new Map<string, typeof merged>();
+    sqlRows.forEach((row, i) => {
+      const group = byGroup.get(row.group_stop_id);
+      if (group) group.push(merged[i]);
+      else byGroup.set(row.group_stop_id, [merged[i]]);
+    });
 
     const result = new Map<string, ArrivalResponse>();
-    for (const row of rows) {
-      const delay = delayMap.get(row.trip_id) ?? null;
-      result.set(row.stop_id, {
-        tripId: row.trip_id,
-        routeId: row.route_id,
-        routeShortName: row.short_name,
-        routeLongName: row.long_name,
-        headsign: row.trip_headsign,
-        realtimeArrival: row.arrival_time,
-        realtimeDelaySeconds: delay,
-        hasRealtime: delay !== null,
-        directionId: row.direction_id ?? null,
-      });
+    for (const [groupStopId, arrivals] of byGroup) {
+      const [next] = selectUpcoming(arrivals, cutoffS, 1);
+      if (next) result.set(groupStopId, toArrivalResponse(next));
     }
     return result;
   }

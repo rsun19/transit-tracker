@@ -228,12 +228,12 @@ Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpda
 
 ### API response cache keys (written by API server)
 
-| Key pattern                                         | TTL   | Invalidation                                          |
-| --------------------------------------------------- | ----- | ----------------------------------------------------- |
-| `cache:routes:{agencyKey}`                          | 300 s | Expires naturally; refreshed after GTFS static ingest |
-| `cache:route:v2:{agencyKey}:{routeId}`              | 300 s | —                                                     |
-| `cache:stop:arrivals:{agencyKey}:{stopId}:{bucket}` | 20 s  | —                                                     |
-| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`     | 45 s  | —                                                     |
+| Key pattern                                              | TTL   | Invalidation                                          |
+| -------------------------------------------------------- | ----- | ----------------------------------------------------- |
+| `cache:routes:{agencyKey}`                               | 300 s | Expires naturally; refreshed after GTFS static ingest |
+| `cache:route:v2:{agencyKey}:{routeId}`                   | 300 s | —                                                     |
+| `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
+| `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`          | 45 s  | —                                                     |
 
 `{lat3dp}` and `{lon3dp}` are latitude/longitude rounded to 3 decimal places (~100 m precision) to improve cache hit rate for nearby-stop queries from slightly different coordinates.
 

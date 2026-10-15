@@ -151,7 +151,7 @@ Static GTFS data source of truth. Key design decisions:
 Two uses:
 
 1. **Realtime data** — `vehicles:{agencyKey}` and `alerts:{agencyKey}` STRING keys, 30 s TTL, written by the worker
-2. **API response cache** — `cache:routes:*`, `cache:stop:arrivals:*`, `cache:stops:nearby:*` STRING keys, short TTLs (20–300 s)
+2. **API response cache** — `cache:routes:*`, `cache:arrivals:*`, `cache:stops:nearby:*` STRING keys, short TTLs (5–300 s)
 
 When Redis is unreachable, `CacheService` returns `null` (no throw) and logs a `WARN`. The vehicles endpoint returns a `503`; all other endpoints degrade gracefully to live DB queries or empty arrays.
 
@@ -224,19 +224,31 @@ appending ADDED trips as extra rows causes each train to appear twice — once f
 static schedule and once from the realtime feed.
 
 `StopsService.getArrivals()` reconciles ADDED trips against the scheduled arrivals
-using a nearest-neighbour match:
+using a nearest-neighbour match. An ADDED trip is at this stop if one of its stops is
+one of the stop's ids, or a child platform of the same parent station.
 
 ```
-For each ADDED trip at this stop (sorted by arrival time ascending):
-  1. Find the closest unmatched scheduled trip with the same routeId AND directionId
-      whose scheduled arrival is within RECONCILE_WINDOW (5 min) of the ADDED time.
+For each ADDED trip at this stop (sorted by predicted time ascending):
+  1. Subway / light rail only (route_type 0 or 1): find the closest unpredicted
+      scheduled trip with the same routeId AND directionId whose scheduled time is
+      within RECONCILE_WINDOW_S (5 min) of the ADDED time. On bus and commuter rail
+      an ADDED trip is real extra service and never hides a scheduled trip.
   2a. Match found →
+        predictedTime        = addedTime
         realtimeDelaySeconds = addedTime − scheduledTime   (negative = running early)
         hasRealtime          = true
         Scheduled slot is marked "consumed" (one-to-one mapping)
   2b. No match (genuinely extra service, e.g. shuttle or unplanned trip) →
-      Append as a new arrival row with hasRealtime = true
+      Append as a new row with status "added" and no scheduled time or delay
 ```
+
+Before reconciliation, `mergeRealtime()` (`services/stops/src/merge-realtime.ts`)
+matches each scheduled row to its `trip_updates:v2` entry: by `stop_sequence`, or for
+unsequenced realtime stops by `stop_id` then parent station. It takes the departure
+prediction (else arrival), computes delay as predicted − scheduled, and flags canceled
+trips, skipped stops, and stops the vehicle has passed. `selectUpcoming()` then filters,
+sorts by effective time, and applies the limit. The nearby endpoint's `nextArrival`
+uses the same functions.
 
 **Why sort ascending first?** On high-frequency routes (e.g. 2-min headways) processing
 order matters. If an ADDED trip at T+1:45 is processed before one at T+0:55, the first
