@@ -120,6 +120,7 @@ export const alertsFeed = (): transit_realtime.FeedMessage =>
           informedEntity: [{ routeId: 'Red', stopId: 'place-alfcl' }],
           effect: 'DETOUR',
           cause: 'CONSTRUCTION',
+          severityLevel: 'SEVERE',
           headerText: {
             translation: [
               { text: 'Desvío en Alewife', language: 'es' },

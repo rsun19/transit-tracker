@@ -7,7 +7,7 @@ import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Link from '@mui/material/Link';
 import { fetchStopArrivals, fetchAlerts, type Arrival, type Alert } from '@/lib/api-client';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { AlertBanner } from '@/components/ui/AlertBanner';
+import { ServiceAlerts } from '@/components/ui/ServiceAlerts';
 import ArrivalTable from './ArrivalTable';
 
 const DEFAULT_AGENCY = 'mbta';
@@ -78,11 +78,12 @@ export default function StopArrivalsClient({
     };
   }, [stopId]);
 
-  // Filter out arrivals that are already in the past (based on realtimeArrival)
+  // Drop arrivals whose vehicle has already left. A train that has arrived
+  // but not departed is still boarding and stays listed.
   const filteredArrivals = useMemo(() => {
     return arrivals.filter((arr) => {
-      const arrTime = new Date(arr.realtimeArrival).getTime();
-      return arrTime >= now;
+      const leaves = new Date(arr.departureTime ?? arr.realtimeArrival).getTime();
+      return leaves >= now;
     });
   }, [arrivals, now]);
 
@@ -122,18 +123,7 @@ export default function StopArrivalsClient({
       </Typography>
 
       {error && <EmptyState message="Could not load arrivals" suggestion={error} />}
-      {!error && alerts.length > 0 && (
-        <Box sx={{ mb: 2 }}>
-          {alerts.map((alert) => (
-            <AlertBanner
-              key={alert.alertId}
-              severity="warning"
-              title={alert.headerText}
-              message={alert.descriptionText}
-            />
-          ))}
-        </Box>
-      )}
+      {!error && <ServiceAlerts alerts={alerts} />}
       {!error && arrivals.length === 0 && (
         <EmptyState
           message="No upcoming arrivals"

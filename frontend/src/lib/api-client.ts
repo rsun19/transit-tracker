@@ -87,6 +87,8 @@ export interface Arrival {
   realtimeDelaySeconds: number | null;
   hasRealtime: boolean;
   directionId: number | null;
+  /** When the vehicle leaves the stop (ISO). Absent from older API responses. */
+  departureTime?: string;
 }
 
 export interface Trip {
@@ -124,6 +126,10 @@ export interface Alert {
   routeIds: string[];
   stopIds: string[];
   effect: string;
+  /** SEVERE, WARNING, INFO or UNKNOWN_SEVERITY. */
+  severityLevel?: string;
+  /** Service disruption or SEVERE; everything else can be folded away. */
+  urgent?: boolean;
 }
 
 export interface Agency {

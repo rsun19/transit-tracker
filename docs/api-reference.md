@@ -281,7 +281,7 @@ Upcoming departures for a stop, merged with GTFS-RT predictions. Trips scheduled
 }
 ```
 
-- Times are the **arrival** time, else the departure (a trip's first stop), as MBTA shows them. A train stays listed until its predicted departure, so one at the platform can show an arrival time just in the past.
+- Times are the **arrival** time, else the departure (a trip's first stop), as MBTA shows them. `departureTime` is when the vehicle leaves the stop; between the two it is boarding. A train stays listed until its predicted departure, so one at the platform can show an arrival time just in the past.
 - `realtimeArrival` is the effective time (`predictedTime` if present, else `scheduledTime`), kept for compatibility.
 - `realtimeDelaySeconds` is `predictedTime − scheduledTime`; `null` without a prediction.
 - `hasRealtime` is true only when a prediction exists.

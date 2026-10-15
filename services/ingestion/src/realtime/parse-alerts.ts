@@ -47,6 +47,12 @@ export function parseAlerts(
       descriptionText: englishText(alert.descriptionText),
       effect: enumName(transit_realtime.Alert.Effect, alert, 'effect', 'UNKNOWN_EFFECT'),
       cause: enumName(transit_realtime.Alert.Cause, alert, 'cause', 'UNKNOWN_CAUSE'),
+      severityLevel: enumName(
+        transit_realtime.Alert.SeverityLevel,
+        alert,
+        'severityLevel',
+        'UNKNOWN_SEVERITY',
+      ),
       activePeriods: (alert.activePeriod ?? []).map((p) => ({
         start: optionalEpoch(p, 'start'),
         end: optionalEpoch(p, 'end'),

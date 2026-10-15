@@ -382,10 +382,22 @@ describe('toArrivalResponse()', () => {
         'hasRealtime',
         'scheduledTime',
         'predictedTime',
+        'departureTime',
         'status',
         'uncertaintySeconds',
       ].sort(),
     );
+  });
+
+  it('exposes when the vehicle leaves, so a boarding train can be shown until then', () => {
+    const [a] = mergeRealtime(
+      [row()],
+      realtime(trip([stop({ arrivalTime: NOW - 20, departureTime: NOW + 40 })])),
+    );
+    expect(toArrivalResponse(a)).toMatchObject({
+      realtimeArrival: iso(NOW - 20),
+      departureTime: iso(NOW + 40),
+    });
   });
 });
 

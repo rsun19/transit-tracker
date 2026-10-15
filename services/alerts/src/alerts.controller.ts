@@ -1,5 +1,10 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { alertsKey, isAlertActive, type ServiceAlert } from '@transit-tracker/shared';
+import {
+  alertsKey,
+  isAlertActive,
+  isUrgentAlert,
+  type ServiceAlert,
+} from '@transit-tracker/shared';
 import { CacheService } from './cache/cache.service';
 import { AgenciesService } from './agencies/agencies.service';
 
@@ -42,6 +47,6 @@ export class AlertsController {
     // child platforms, so an exact match here covers both levels.
     if (stopId) filtered = filtered.filter((a) => a.stopIds.includes(stopId));
 
-    return { alerts: filtered };
+    return { alerts: filtered.map((a) => ({ ...a, urgent: isUrgentAlert(a) })) };
   }
 }

@@ -48,6 +48,12 @@ export interface ArrivalResponse {
   scheduledTime: string | null;
   /** Predicted arrival (else departure, at a trip's first stop), ISO. */
   predictedTime: string | null;
+  /**
+   * When the vehicle leaves this stop (departure, else arrival; predicted if
+   * known, else scheduled), ISO. A train is boarding while
+   * realtimeArrival <= now < departureTime.
+   */
+  departureTime: string;
   status: ArrivalStatus;
   uncertaintySeconds: number | null;
 }
