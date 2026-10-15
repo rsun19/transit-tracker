@@ -1,10 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { RoutesModule } from './routes.module';
 import { HttpExceptionFilter } from './http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(RoutesModule, {
+  const app = await NestFactory.create<NestExpressApplication>(RoutesModule, {
     logger: {
       log: (message: string, context?: string) =>
         process.stdout.write(
@@ -56,6 +57,7 @@ async function bootstrap() {
   });
 
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.disable('x-powered-by');
   app.enableCors({ origin: false });
 
   const httpServer = app.getHttpServer() as import('http').Server;

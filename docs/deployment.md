@@ -9,11 +9,11 @@ Production runs on a Hetzner VPS behind nginx with TLS via Let's Encrypt. GitHub
 ```
 GitHub Actions CI
   └── build + push → GHCR (ghcr.io/rsun19/transit-tracker-*)
-  └── scp → docker-compose.yml, nginx.conf → /opt/transit-tracker/
+  └── scp → docker-compose.yml, nginx.conf, nginx/snippets/ → /opt/transit-tracker/
   └── ssh → docker compose pull && docker compose up -d
 
 Hetzner VPS (Ubuntu 24.04)
-  ├── nginx:1.27-alpine       → port 80 (ACME) + 443 (TLS proxy)
+  ├── nginx:1.27-alpine       → port 80 (ACME + redirect) + 443 (TLS proxy); 8080 internal (SSR API)
   ├── agencies (NestJS)       → :3001 (internal, no DB)
   ├── routes (NestJS)         → :3002 (internal, DB)
   ├── stops (NestJS)          → :3003 (internal, DB)

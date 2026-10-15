@@ -116,15 +116,17 @@ These values are compiled into the shared library. To change them, edit `package
 
 ## NGINX Rate Limiting
 
-NGINX sits in front of all services and applies per-IP rate limiting to the `/api/` path.
+NGINX sits in front of all services and applies per-IP rate limiting on the public HTTPS server. The internal `:8080` server used by frontend SSR is not rate-limited, and is not published.
 
-| Setting       | Value                       | Description                                                                   |
-| ------------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Zone          | `api` — 10 MB shared memory | Stores per-IP state. At ~64 B per IP, 10 MB handles ~160,000 tracked clients. |
-| Rate          | `1 req/s per IP`            | Baseline sustained request rate.                                              |
-| Burst         | `10 requests (nodelay)`     | Allows short bursts up to 10 requests without queuing delay.                  |
-| Excess status | `429`                       | Returns JSON `{"error":"Rate limit exceeded","statusCode":429}`.              |
-| `/health`     | Not rate-limited            | Health check endpoint is excluded from the zone.                              |
+| Setting       | Value                       | Description                                                                    |
+| ------------- | --------------------------- | ------------------------------------------------------------------------------ |
+| Zone          | `api` — 10 MB shared memory | Stores per-IP state. At ~64 B per IP, 10 MB handles ~160,000 tracked clients.  |
+| Rate          | `1 req/s per IP`            | Baseline sustained request rate.                                               |
+| Burst         | `10 requests (nodelay)`     | Allows short bursts up to 10 requests without queuing delay.                   |
+| Excess status | `429`                       | Returns JSON `{"error":"Rate limit exceeded","statusCode":429}`.               |
+| `/health`     | Same `api` zone             | Public `/health` shares the API limit; the container healthcheck uses `:8080`. |
+
+SSR pages (`location /`) use a separate `pages` zone: 5 req/s per IP, burst 20 (nodelay), returning nginx's default 429 page. `/_next/static/` (content-hashed build assets) is exempt.
 
 To increase the rate limit for an internal or trusted network, add an `allow` / `geo` block before the `limit_req_zone` directive in `nginx.conf` and set a separate zone with a higher rate.
 
@@ -134,7 +136,7 @@ To increase the rate limit for an internal or trusted network, add an `allow` / 
 
 | Service     | Internal Port | Exposed Port (prod / dev) | Notes                                                                                        |
 | ----------- | ------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
-| `nginx`     | 80, 443       | **80, 443** / **3000**    | Entry point — routes `/api/` to microservices, everything else to frontend                   |
+| `nginx`     | 80, 443, 8080 | **80, 443** / **3000**    | Entry point — routes `/api/` to microservices, everything else to frontend; 8080 is SSR-only |
 | `frontend`  | 3001          | —                         | Next.js 14 server                                                                            |
 | `agencies`  | 3001          | —                         | NestJS microservice — agency config API                                                      |
 | `routes`    | 3002          | —                         | NestJS microservice — routes + trips + shapes API                                            |

@@ -189,10 +189,11 @@ services:
       dockerfile: frontend/Dockerfile
       target: production
       args:
-        BACKEND_URL: http://nginx:80
+        # Internal-only nginx server (not published); see nginx.conf
+        BACKEND_URL: http://nginx:8080
     environment:
       NODE_ENV: production
-      BACKEND_URL: http://nginx:80
+      BACKEND_URL: http://nginx:8080
       HOSTNAME: '0.0.0.0'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3001/api/health || exit 1']
@@ -207,6 +208,7 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
       - certbot_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     # nginx only reads certs at startup; reload every 6h so certificates renewed
@@ -217,6 +219,7 @@ services:
         '-c',
         'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g "daemon off;"',
       ]
+    # 8080 (internal API proxy for frontend SSR) is deliberately not published.
     ports:
       - '80:80'
       - '443:443'
@@ -234,7 +237,7 @@ services:
       frontend:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://agencies:3001/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/health || exit 1']
       interval: 15s
       timeout: 5s
       retries: 3
