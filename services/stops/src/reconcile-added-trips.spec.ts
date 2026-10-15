@@ -27,6 +27,7 @@ function sched(overrides: Partial<MergedArrival> = {}): MergedArrival {
     status: 'scheduled',
     uncertaintySeconds: null,
     effectiveTime: scheduledEpoch,
+    leavesAt: scheduledEpoch,
     scheduledEpoch,
     serviceDate: '20260403',
     routeType: SUBWAY,
@@ -45,6 +46,7 @@ function added(overrides: Partial<AddedTripEntry> = {}): AddedTripEntry {
       headsign: null,
     },
     predictedTime: T0, // same as scheduled by default
+    leavesAt: overrides.predictedTime ?? T0,
     uncertaintySeconds: null,
     routeType: SUBWAY,
     routeShortName: 'RL',

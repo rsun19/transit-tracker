@@ -20,10 +20,12 @@ export function ArrivalRow({ arrival }: ArrivalRowProps) {
 
   // Use realtimeArrival directly (already computed by backend)
   const effectiveIso = arrival.realtimeArrival;
-  // Format as local time string (HH:MM)
+  // Format as local time string (HH:MM), rounded to the nearest minute like
+  // MBTA does (toLocaleTimeString alone would truncate 8:08:58 to 8:08).
   let formattedTime = effectiveIso;
   try {
-    formattedTime = new Date(effectiveIso).toLocaleTimeString([], {
+    const roundedMs = Math.round(new Date(effectiveIso).getTime() / 60_000) * 60_000;
+    formattedTime = new Date(roundedMs).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });

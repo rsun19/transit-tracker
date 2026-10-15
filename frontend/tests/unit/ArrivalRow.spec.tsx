@@ -90,3 +90,19 @@ describe('late realtime arrival', () => {
     expect(screen.queryByText('(scheduled)')).not.toBeInTheDocument();
   });
 });
+
+describe('time formatting', () => {
+  const fmt = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  it('rounds to the nearest minute like MBTA (8:08:58 shows as 8:09)', () => {
+    const at = new Date(2026, 9, 15, 8, 8, 58);
+    wrap({ ...BASE, realtimeArrival: at.toISOString() });
+    expect(screen.getByText(fmt(new Date(2026, 9, 15, 8, 9)))).toBeInTheDocument();
+  });
+
+  it('rounds down under 30 seconds (8:08:20 shows as 8:08)', () => {
+    const at = new Date(2026, 9, 15, 8, 8, 20);
+    wrap({ ...BASE, realtimeArrival: at.toISOString() });
+    expect(screen.getByText(fmt(new Date(2026, 9, 15, 8, 8)))).toBeInTheDocument();
+  });
+});

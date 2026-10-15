@@ -51,6 +51,7 @@ export function reconcileAddedTrips(
         entry.predictedTime,
         entry.predictedTime - arr.scheduledEpoch!,
         entry.uncertaintySeconds,
+        entry.leavesAt,
       );
       if (!arr.headsign) arr.headsign = entry.trip.headsign ?? entry.headsignFallback;
     } else {
@@ -69,13 +70,14 @@ export function reconcileAddedTrips(
         status: 'added',
         uncertaintySeconds: null,
         effectiveTime: entry.predictedTime,
+        leavesAt: entry.leavesAt,
         scheduledEpoch: null,
         serviceDate: null,
         routeType: entry.routeType,
         pickupType: null,
         passed: false,
       };
-      applyPrediction(extra, entry.predictedTime, null, entry.uncertaintySeconds);
+      applyPrediction(extra, entry.predictedTime, null, entry.uncertaintySeconds, entry.leavesAt);
       arrivals.push(extra);
       reconciledIndices.add(arrivals.length - 1);
     }

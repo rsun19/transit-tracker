@@ -56,9 +56,9 @@ const todayServicesCte = (agency: string, today: string, yesterday: string) => `
           END = true
   )`;
 
-/** Scheduled boarding time (departure, else arrival) as timestamptz. */
+/** Scheduled arrival (else departure) as timestamptz; the time shown to riders. */
 const scheduledTs = (tz: string) =>
-  `((ts.d + COALESCE(st.departure_time, st.arrival_time))::timestamp AT TIME ZONE ${tz})`;
+  `((ts.d + COALESCE(st.arrival_time, st.departure_time))::timestamp AT TIME ZONE ${tz})`;
 
 const scheduledColumns = (tz: string) => `
   st.trip_id, t.route_id, r.short_name, r.long_name, r.route_type, t.trip_headsign,
@@ -424,6 +424,7 @@ export class StopsService {
     pendingAdded: Array<{
       trip: TripRealtime;
       predictedTime: number;
+      leavesAt: number;
       uncertainty: number | null;
     }>,
   ): Promise<AddedTripEntry[]> {
@@ -456,7 +457,7 @@ export class StopsService {
       headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
     );
 
-    return pendingAdded.map(({ trip, predictedTime, uncertainty }) => {
+    return pendingAdded.map(({ trip, predictedTime, leavesAt, uncertainty }) => {
       const route = routeMap.get(trip.routeId!);
       return {
         trip: {
@@ -466,6 +467,7 @@ export class StopsService {
           headsign: null,
         },
         predictedTime,
+        leavesAt,
         uncertaintySeconds: uncertainty,
         routeType: route?.route_type ?? null,
         routeShortName: route?.short_name ?? null,
