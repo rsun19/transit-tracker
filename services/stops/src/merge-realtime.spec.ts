@@ -346,6 +346,17 @@ describe('selectUpcoming()', () => {
     expect(selectUpcoming(departed, cutoff, 10)).toEqual([]);
   });
 
+  it('with an arrival-only prediction, keeps the train listed for its scheduled dwell', () => {
+    // Scheduled 60 s dwell; predicted 2 min late, arrived 50 s ago -> leaves in 10 s.
+    const merged = mergeRealtime(
+      [row({ scheduledArrival: NOW - 170, scheduledDeparture: NOW - 110 })],
+      realtime(trip([stop({ arrivalTime: NOW - 50 })])),
+    );
+    const [a] = selectUpcoming(merged, cutoff, 10);
+    expect(a.predictedTime).toBe(iso(NOW - 50));
+    expect(a.realtimeDelaySeconds).toBe(120);
+  });
+
   it('keeps a scheduled-only row listed until its scheduled departure', () => {
     const merged = mergeRealtime(
       [row({ scheduledArrival: NOW - 60, scheduledDeparture: NOW + 30 })],

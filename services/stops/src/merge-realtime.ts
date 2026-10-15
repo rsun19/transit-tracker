@@ -212,7 +212,8 @@ export function mergeRealtime(
     if (stop.arrivalTime !== null) {
       predicted = stop.arrivalTime;
       reference = row.scheduledArrival ?? scheduled;
-      leaves = stop.departureTime ?? predicted;
+      // Arrival-only update: assume the scheduled dwell, shifted by the same delay.
+      leaves = stop.departureTime ?? scheduledLeaves + (predicted - reference);
     } else if (stop.departureTime !== null) {
       predicted = stop.departureTime;
       reference = row.scheduledDeparture ?? scheduled;
