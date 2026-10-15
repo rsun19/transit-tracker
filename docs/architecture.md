@@ -200,18 +200,26 @@ GtfsRealtimeService.pollAgency(agency)   — VehiclePositions, TripUpdates and A
          CANCELED            → trip_updates   {canceled: true, stops: []}
          ADDED, or trip_id
          not in static GTFS  → added_trips    (needs a route_id)
+         DUPLICATED          → added_trips    (keyed trip_id@date#start_time;
+                                               route from static GTFS if absent)
          otherwise           → trip_updates
+       Hash fields are trip_id@YYYYMMDD (bare trip_id if no start_date), so
+       the same trip_id on two service days doesn't collide.
        Per stop: arrivalTime and departureTime kept separately; delay is null
        unless the feed sends one; SKIPPED stops kept with skipped: true;
-       NO_DATA stops dropped; realtime (possibly child-platform) stop_id kept
+       NO_DATA stops kept with no times (the reader uses the schedule there);
+       realtime (possibly child-platform) stop_id kept
        alongside stop_sequence
     4. One MULTI: build each hash under {key}:tmp, EXPIRE 60, RENAME over the
        live key (trip_updates:v2:{key}, added_trips:v2:{key}). Readers never
        see a missing or partial hash. An empty feed writes nothing, so the
-       keys expire instead of serving stale predictions.
+       keys expire instead of serving stale predictions. Feeds more than
+       120 s old, more than 60 s in the future, or older than the last one
+       written are skipped.
 
   Alerts (parseAlerts):
-    English translation, active periods, informed route/stop/trip ids.
+    English translation ("en", then "en-*", then untagged), active periods,
+    informed route/stop/trip ids.
     stopIds are widened to each informed stop's parent station and child
     platforms. SET alerts:{key} JSON(alerts) EX 30 (written even when empty)
 ```
@@ -246,9 +254,11 @@ Before reconciliation, `mergeRealtime()` (`services/stops/src/merge-realtime.ts`
 matches each scheduled row to its `trip_updates:v2` entry: by `stop_sequence`, or for
 unsequenced realtime stops by `stop_id` then parent station. It takes the departure
 prediction (else arrival), computes delay as predicted − scheduled, and flags canceled
-trips, skipped stops, and stops the vehicle has passed. `selectUpcoming()` then filters,
-sorts by effective time, and applies the limit. The nearby endpoint's `nextArrival`
-uses the same functions.
+trips, skipped stops, and stops the vehicle has passed. A stop the feed leaves out takes
+the previous listed stop's `delay` field, when the feed sends one. `selectUpcoming()`
+then filters, sorts by effective time, keeps each trip's next visit (loop routes stop
+twice), and applies the limit. The nearby endpoint's `nextArrival` uses the same
+functions, including ADDED-trip reconciliation.
 
 **Why sort ascending first?** On high-frequency routes (e.g. 2-min headways) processing
 order matters. If an ADDED trip at T+1:45 is processed before one at T+0:55, the first

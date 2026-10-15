@@ -47,7 +47,7 @@ function swapHash(
   }
   const tmpKey = `${liveKey}:tmp`;
   const hash: Record<string, string> = {};
-  for (const [tripId, trip] of entries) hash[tripId] = JSON.stringify(trip);
+  for (const [field, trip] of entries) hash[field] = JSON.stringify(trip);
 
   // Clear any leftover tmp key so the new hash can't inherit stale fields.
   tx.del(tmpKey);

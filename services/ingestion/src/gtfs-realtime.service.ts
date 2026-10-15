@@ -9,6 +9,7 @@ import {
   ALERTS_CACHE_TTL_S,
   TRIP_UPDATE_CACHE_TTL_S,
   REALTIME_FEED_MAX_AGE_S,
+  REALTIME_FEED_MAX_FUTURE_S,
   REALTIME_FETCH_TIMEOUT_MS,
 } from '@transit-tracker/shared';
 import { transit_realtime } from 'gtfs-realtime-bindings';
@@ -97,6 +98,14 @@ export class GtfsRealtimeService {
       );
       return false;
     }
+    if (-ageS > REALTIME_FEED_MAX_FUTURE_S) {
+      // Recording a future timestamp would make every later feed look like it
+      // went backwards, blocking all writes until restart.
+      this.logger.warn(
+        `${label} feed for ${agency.key} is ${-ageS}s in the future (limit ${REALTIME_FEED_MAX_FUTURE_S}s); not writing it`,
+      );
+      return false;
+    }
     const lastTs = this.lastWrittenFeedTimestamp.get(`${label}:${agency.key}`);
     if (lastTs !== undefined && feedTs < lastTs) {
       this.logger.warn(
@@ -156,7 +165,7 @@ export class GtfsRealtimeService {
       if (!feed || !this.isFeedFresh(feed, agency, label)) return;
 
       const lookup = await this.staticLookup.get(agency.key);
-      const parsed = parseTripUpdates(feed, lookup?.validTripIds ?? null);
+      const parsed = parseTripUpdates(feed, lookup?.trips ?? null);
 
       const written = await writeTripUpdates(
         this.cacheService.getClient(),

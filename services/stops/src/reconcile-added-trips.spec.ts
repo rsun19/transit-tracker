@@ -28,6 +28,7 @@ function sched(overrides: Partial<MergedArrival> = {}): MergedArrival {
     uncertaintySeconds: null,
     effectiveTime: scheduledEpoch,
     scheduledEpoch,
+    serviceDate: '20260403',
     routeType: SUBWAY,
     pickupType: null,
     passed: false,
@@ -151,6 +152,16 @@ describe('reconcileAddedTrips()', () => {
       reconcileAddedTrips(deps, [added()]);
 
       expect(deps).toHaveLength(3);
+    });
+
+    it('does not claim a row the vehicle has already passed', () => {
+      // The passed row is filtered out later; claiming it would hide the ADDED trip.
+      const deps = [sched({ tripId: 'passed', scheduledEpoch: T0 - 120, passed: true })];
+      reconcileAddedTrips(deps, [added({ predictedTime: T0 + 120 })]);
+
+      expect(deps).toHaveLength(2);
+      expect(deps[0].hasRealtime).toBe(false);
+      expect(deps[1]).toMatchObject({ tripId: 'ADDED-001', status: 'added', passed: false });
     });
   });
 

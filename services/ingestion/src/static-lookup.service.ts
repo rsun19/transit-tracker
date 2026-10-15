@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { StopHierarchy } from './realtime/parse-alerts';
+import type { StaticTrip } from './realtime/parse-trip-updates';
 
 type AgencyLookup = {
-  validTripIds: ReadonlySet<string>;
+  trips: ReadonlyMap<string, StaticTrip>;
   stops: StopHierarchy;
 };
 
@@ -38,11 +39,24 @@ export class StaticLookupService {
     }
   }
 
-  /** Reloads from the database. Call after a static ingestion commits. */
+  /**
+   * Reloads from the database. Call after a static ingestion commits. On
+   * failure the cached copy is dropped, so the next get() retries instead of
+   * using the previous feed's trip_ids (which would mark new trips as ADDED).
+   */
   async refresh(agencyKey: string): Promise<AgencyLookup | null> {
+    try {
+      return await this.load(agencyKey);
+    } catch (err: unknown) {
+      this.lookups.delete(agencyKey);
+      throw err;
+    }
+  }
+
+  private async load(agencyKey: string): Promise<AgencyLookup | null> {
     const [tripRows, stopRows] = await Promise.all([
-      this.dataSource.query<Array<{ tripId: string }>>(
-        `SELECT t.trip_id AS "tripId"
+      this.dataSource.query<Array<{ tripId: string; routeId: string; directionId: number | null }>>(
+        `SELECT t.trip_id AS "tripId", t.route_id AS "routeId", t.direction_id AS "directionId"
            FROM trips t
            JOIN agencies a ON a."agencyId" = t.agency_id
           WHERE a.agency_key = $1`,
@@ -72,12 +86,14 @@ export class StaticLookupService {
     }
 
     const lookup: AgencyLookup = {
-      validTripIds: new Set(tripRows.map((r) => r.tripId)),
+      trips: new Map(
+        tripRows.map((r) => [r.tripId, { routeId: r.routeId, directionId: r.directionId ?? null }]),
+      ),
       stops: { parentOf, childrenOf },
     };
     this.lookups.set(agencyKey, lookup);
     this.logger.log(
-      `Loaded static lookup for ${agencyKey}: ${lookup.validTripIds.size} trips, ${parentOf.size} child stops`,
+      `Loaded static lookup for ${agencyKey}: ${lookup.trips.size} trips, ${parentOf.size} child stops`,
     );
     return lookup;
   }

@@ -15,6 +15,7 @@ import {
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
   addedTripsKey,
+  tripRealtimeField,
   tripUpdatesKey,
   type TripRealtime,
 } from '@transit-tracker/shared';
@@ -27,6 +28,7 @@ import {
   selectUpcoming,
   stopIdsNeedingParent,
   toArrivalResponse,
+  type MergedArrival,
   type ScheduledRow,
 } from './merge-realtime';
 import { StopRouteRef, StopResponse, ArrivalResponse, AddedTripEntry } from './stops.types';
@@ -107,6 +109,10 @@ const toScheduledRow = (r: ScheduledSqlRow): ScheduledRow => ({
 });
 
 const isoFromEpoch = (epochS: number) => new Date(epochS * 1000).toISOString();
+
+// Upcoming scheduled rows fetched per platform for nearby. Leaves room for a
+// few canceled, skipped or no-pickup rows ahead of the real next arrival.
+const NEARBY_UPCOMING_PER_PLATFORM = 6;
 
 @Injectable()
 export class StopsService {
@@ -355,16 +361,16 @@ export class StopsService {
 
     // Late candidates (scheduled before the cutoff) are bounded by the window.
     // Upcoming rows get a generous limit; the real limit is applied after the
-    // realtime merge, since predictions can reorder them.
+    // realtime merge, since predictions can reorder them. Every visit is kept
+    // (loop routes stop here twice); selectUpcoming keeps each trip's next one.
     const sqlRows = await this.dataSource.query<ScheduledSqlRow[]>(
       `WITH ${todayServicesCte('$2', '$3', '$4')},
        candidates AS (
-         SELECT DISTINCT ON (st.trip_id, ts.d) ${scheduledColumns('$5')}
+         SELECT ${scheduledColumns('$5')}
          FROM stop_times st
          ${scheduledJoins}
          WHERE st.stop_id = ANY($1) AND st.agency_id = $2
            AND ${scheduledTs('$5')} >= $6::timestamptz
-         ORDER BY st.trip_id, ts.d, sched_ts ASC
        )
        (SELECT * FROM candidates WHERE sched_ts < $7::timestamptz)
        UNION ALL
@@ -383,10 +389,7 @@ export class StopsService {
     const rows = sqlRows.map(toScheduledRow);
 
     const [realtimeByTrip, addedTrips] = await Promise.all([
-      this.loadTripRealtime(
-        agencyKey,
-        rows.map((r) => r.tripId),
-      ),
+      this.loadTripRealtime(agencyKey, rows),
       this.loadAddedTrips(agencyKey),
     ]);
 
@@ -406,55 +409,7 @@ export class StopsService {
       const at = addedTripStopAt(trip, effectiveStopIdSet, stationIds, parentOf, cutoffS);
       return at ? [{ trip, ...at }] : [];
     });
-    if (pendingAdded.length > 0) {
-      const addedRouteIdList = [...new Set(pendingAdded.map(({ trip }) => trip.routeId!))];
-      const [routeRows, headsignRows] = await Promise.all([
-        this.dataSource.query<
-          Array<{
-            route_id: string;
-            short_name: string | null;
-            long_name: string | null;
-            route_type: number;
-          }>
-        >(
-          `SELECT route_id, short_name, long_name, route_type FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
-          [agencyId, addedRouteIdList],
-        ),
-        this.dataSource.query<
-          Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
-        >(
-          `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
-           FROM trips WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
-           ORDER BY route_id, direction_id, trip_headsign`,
-          [agencyId, addedRouteIdList],
-        ),
-      ]);
-
-      const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
-      const headsignMap = new Map(
-        headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
-      );
-
-      const entries: AddedTripEntry[] = pendingAdded.map(({ trip, predictedTime, uncertainty }) => {
-        const route = routeMap.get(trip.routeId!);
-        return {
-          trip: {
-            tripId: trip.tripId,
-            routeId: trip.routeId!,
-            directionId: trip.directionId,
-            headsign: null,
-          },
-          predictedTime,
-          uncertaintySeconds: uncertainty,
-          routeType: route?.route_type ?? null,
-          routeShortName: route?.short_name ?? null,
-          routeLongName: route?.long_name ?? null,
-          headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
-        };
-      });
-
-      reconcileAddedTrips(merged, entries);
-    }
+    reconcileAddedTrips(merged, await this.buildAddedEntries(agencyId, pendingAdded));
 
     const data = selectUpcoming(merged, cutoffS, cappedLimit).map(toArrivalResponse);
 
@@ -463,21 +418,84 @@ export class StopsService {
     return result;
   }
 
-  /** Reads trip_updates:v2 for the given trips. Missing or malformed entries are skipped. */
+  /** Looks up route names and headsigns for ADDED trips boarding at a stop. */
+  private async buildAddedEntries(
+    agencyId: string,
+    pendingAdded: Array<{
+      trip: TripRealtime;
+      predictedTime: number;
+      uncertainty: number | null;
+    }>,
+  ): Promise<AddedTripEntry[]> {
+    if (pendingAdded.length === 0) return [];
+    const addedRouteIdList = [...new Set(pendingAdded.map(({ trip }) => trip.routeId!))];
+    const [routeRows, headsignRows] = await Promise.all([
+      this.dataSource.query<
+        Array<{
+          route_id: string;
+          short_name: string | null;
+          long_name: string | null;
+          route_type: number;
+        }>
+      >(
+        `SELECT route_id, short_name, long_name, route_type FROM routes WHERE agency_id = $1 AND route_id = ANY($2)`,
+        [agencyId, addedRouteIdList],
+      ),
+      this.dataSource.query<
+        Array<{ route_id: string; direction_id: number | null; trip_headsign: string }>
+      >(
+        `SELECT DISTINCT ON (route_id, direction_id) route_id, direction_id, trip_headsign
+         FROM trips WHERE agency_id = $1 AND route_id = ANY($2) AND trip_headsign IS NOT NULL
+         ORDER BY route_id, direction_id, trip_headsign`,
+        [agencyId, addedRouteIdList],
+      ),
+    ]);
+
+    const routeMap = new Map(routeRows.map((r) => [r.route_id, r]));
+    const headsignMap = new Map(
+      headsignRows.map((r) => [`${r.route_id}|${r.direction_id}`, r.trip_headsign]),
+    );
+
+    return pendingAdded.map(({ trip, predictedTime, uncertainty }) => {
+      const route = routeMap.get(trip.routeId!);
+      return {
+        trip: {
+          tripId: trip.tripId,
+          routeId: trip.routeId!,
+          directionId: trip.directionId,
+          headsign: null,
+        },
+        predictedTime,
+        uncertaintySeconds: uncertainty,
+        routeType: route?.route_type ?? null,
+        routeShortName: route?.short_name ?? null,
+        routeLongName: route?.long_name ?? null,
+        headsignFallback: headsignMap.get(`${trip.routeId}|${trip.directionId}`) ?? null,
+      };
+    });
+  }
+
+  /**
+   * Reads trip_updates:v2 for the given rows, by trip_id + service date and by
+   * bare trip_id (feeds without a start date). Keyed by hash field, as
+   * mergeRealtime expects. Missing or malformed entries are skipped.
+   */
   private async loadTripRealtime(
     agencyKey: string,
-    tripIds: string[],
+    rows: ScheduledRow[],
   ): Promise<Map<string, TripRealtime>> {
     const result = new Map<string, TripRealtime>();
-    const unique = [...new Set(tripIds)];
-    if (unique.length === 0) return result;
+    const fields = [
+      ...new Set(rows.flatMap((r) => [tripRealtimeField(r.tripId, r.serviceDate), r.tripId])),
+    ];
+    if (fields.length === 0) return result;
     try {
       const values = await this.cacheService
         .getClient()
-        .hmget(tripUpdatesKey(agencyKey), ...unique);
-      unique.forEach((tripId, i) => {
+        .hmget(tripUpdatesKey(agencyKey), ...fields);
+      fields.forEach((field, i) => {
         const trip = parseTripRealtime(values[i]);
-        if (trip) result.set(tripId, trip);
+        if (trip) result.set(field, trip);
       });
     } catch {
       /* Redis unavailable — fall back to the schedule */
@@ -769,7 +787,7 @@ export class StopsService {
           WHERE st.stop_id = es.effective_stop_id AND st.agency_id = $2
             AND ${scheduledTs('$5')} >= $7::timestamptz
           ORDER BY sched_ts ASC
-          LIMIT 3)
+          LIMIT $8)
        ) dep`,
       [
         stopIds,
@@ -779,26 +797,48 @@ export class StopsService {
         timezone,
         isoFromEpoch(nowS - ARRIVALS_LATE_WINDOW_S),
         isoFromEpoch(cutoffS),
+        NEARBY_UPCOMING_PER_PLATFORM,
       ],
     );
 
     const rows = sqlRows.map(toScheduledRow);
-    const realtimeByTrip = await this.loadTripRealtime(
-      agencyKey,
-      rows.map((r) => r.tripId),
-    );
-    const parentOf = await this.loadParentStations(
-      agencyId,
-      stopIdsNeedingParent(realtimeByTrip.values()),
-    );
+    const [realtimeByTrip, addedTrips] = await Promise.all([
+      this.loadTripRealtime(agencyKey, rows),
+      this.loadAddedTrips(agencyKey),
+    ]);
+    const parentOf = await this.loadParentStations(agencyId, [
+      ...stopIdsNeedingParent(realtimeByTrip.values()),
+      ...addedTrips.flatMap((t) => t.stops.map((s) => s.stopId).filter((id): id is string => !!id)),
+    ]);
     const merged = mergeRealtime(rows, realtimeByTrip, parentOf);
 
-    const byGroup = new Map<string, typeof merged>();
+    const byGroup = new Map<string, MergedArrival[]>(stopIds.map((id) => [id, []]));
+    const platformsByGroup = new Map<string, Set<string>>(stopIds.map((id) => [id, new Set([id])]));
     sqlRows.forEach((row, i) => {
-      const group = byGroup.get(row.group_stop_id);
-      if (group) group.push(merged[i]);
-      else byGroup.set(row.group_stop_id, [merged[i]]);
+      byGroup.get(row.group_stop_id)?.push(merged[i]);
+      platformsByGroup.get(row.group_stop_id)?.add(row.stop_id);
     });
+
+    // ADDED trips, placed and reconciled per stop exactly as in getArrivals.
+    // The group's own id is passed as a station, so a parent station's child
+    // platforms match through parentOf.
+    const pendingAdded = [...byGroup.keys()].flatMap((groupStopId) =>
+      addedTrips.flatMap((trip) => {
+        const at = addedTripStopAt(
+          trip,
+          platformsByGroup.get(groupStopId)!,
+          new Set([groupStopId]),
+          parentOf,
+          cutoffS,
+        );
+        return at ? [{ groupStopId, trip, ...at }] : [];
+      }),
+    );
+    const addedEntries = await this.buildAddedEntries(agencyId, pendingAdded);
+    for (const groupStopId of byGroup.keys()) {
+      const entries = addedEntries.filter((_, i) => pendingAdded[i].groupStopId === groupStopId);
+      if (entries.length > 0) reconcileAddedTrips(byGroup.get(groupStopId)!, entries);
+    }
 
     const result = new Map<string, ArrivalResponse>();
     for (const [groupStopId, arrivals] of byGroup) {

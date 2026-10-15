@@ -30,7 +30,9 @@ export function reconcileAddedTrips(
       for (let i = 0; i < arrivals.length; i++) {
         if (reconciledIndices.has(i)) continue;
         const arr = arrivals[i];
-        if (arr.hasRealtime || arr.status !== 'scheduled' || arr.scheduledEpoch === null) continue;
+        // A passed row is about to be filtered out; claiming it would hide the ADDED trip.
+        if (arr.hasRealtime || arr.passed || arr.status !== 'scheduled') continue;
+        if (arr.scheduledEpoch === null) continue;
         if (arr.routeId !== entry.trip.routeId) continue;
         if (arr.directionId !== entry.trip.directionId) continue;
         const diff = Math.abs(entry.predictedTime - arr.scheduledEpoch);
@@ -68,6 +70,7 @@ export function reconcileAddedTrips(
         uncertaintySeconds: null,
         effectiveTime: entry.predictedTime,
         scheduledEpoch: null,
+        serviceDate: null,
         routeType: entry.routeType,
         pickupType: null,
         passed: false,

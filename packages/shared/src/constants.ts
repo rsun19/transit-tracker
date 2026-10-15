@@ -8,6 +8,9 @@ export const TRIP_UPDATE_CACHE_TTL_S = 60;
 // A GTFS-RT feed whose header timestamp is older than this is treated as stale
 // and not written to Redis.
 export const REALTIME_FEED_MAX_AGE_S = 120;
+// A feed timestamp further in the future than this is a bad clock (or ms sent
+// as seconds) and is rejected, so it can't block every later write.
+export const REALTIME_FEED_MAX_FUTURE_S = 60;
 export const REALTIME_FETCH_TIMEOUT_MS = 10_000;
 // Arrivals carry live predictions, so cache them only briefly on top of the
 // worker poll and the frontend poll.

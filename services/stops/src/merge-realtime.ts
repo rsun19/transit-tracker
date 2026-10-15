@@ -1,5 +1,6 @@
 import {
   ARRIVAL_ON_TIME_THRESHOLD_S,
+  tripRealtimeField,
   type StopRealtime,
   type TripRealtime,
 } from '@transit-tracker/shared';
@@ -31,6 +32,8 @@ export type MergedArrival = ArrivalResponse & {
   effectiveTime: number;
   /** Scheduled boarding time, epoch seconds; null for added trips. */
   scheduledEpoch: number | null;
+  /** YYYYMMDD service day of the scheduled row; null for added trips. */
+  serviceDate: string | null;
   routeType: number | null;
   pickupType: number | null;
   /** The vehicle is already past this stop (the feed no longer lists it). */
@@ -109,10 +112,28 @@ function findStop(
   );
 }
 
+const allSequenced = (stops: StopRealtime[]) =>
+  stops.length > 0 && stops.every((s) => s.stopSequence !== null);
+
 /** The feed drops stops a vehicle has passed, so a sequence before the first listed one is behind it. */
 function hasPassed(stops: StopRealtime[], stopSequence: number): boolean {
-  if (stops.length === 0 || stops.some((s) => s.stopSequence === null)) return false;
+  if (!allSequenced(stops)) return false;
   return stopSequence < Math.min(...stops.map((s) => s.stopSequence!));
+}
+
+/**
+ * GTFS-RT delay propagation: a stop the feed leaves out takes the delay of the
+ * nearest earlier listed stop. Only possible when that stop sends a delay; a
+ * NO_DATA stop (no delay) stops propagation, as the spec requires.
+ */
+function propagatedDelay(stops: StopRealtime[], stopSequence: number): number | null {
+  if (!allSequenced(stops)) return null;
+  let previous: StopRealtime | null = null;
+  for (const s of stops) {
+    if (s.stopSequence! >= stopSequence) break;
+    if (!s.skipped) previous = s;
+  }
+  return previous?.delay ?? null;
 }
 
 /**
@@ -143,13 +164,16 @@ export function mergeRealtime(
       uncertaintySeconds: null,
       effectiveTime: scheduled,
       scheduledEpoch: scheduled,
+      serviceDate: row.serviceDate,
       routeType: row.routeType,
       pickupType: row.pickupType,
       passed: false,
     };
 
-    const trip = realtimeByTrip.get(row.tripId);
     // The same trip_id can be scheduled on yesterday's and today's service day.
+    const trip =
+      realtimeByTrip.get(tripRealtimeField(row.tripId, row.serviceDate)) ??
+      realtimeByTrip.get(row.tripId);
     if (!trip || (trip.startDate && trip.startDate !== row.serviceDate)) return arrival;
     if (trip.canceled) {
       arrival.status = 'canceled';
@@ -159,6 +183,8 @@ export function mergeRealtime(
     const stop = findStop(trip.stops, row, parentOf);
     if (!stop) {
       arrival.passed = hasPassed(trip.stops, row.stopSequence);
+      const delay = arrival.passed ? null : propagatedDelay(trip.stops, row.stopSequence);
+      if (delay !== null) applyPrediction(arrival, scheduled + delay, delay, null);
       return arrival;
     }
     if (stop.skipped) {
@@ -189,14 +215,16 @@ export function mergeRealtime(
 
 /**
  * Drops canceled trips, skipped stops, rows with no pickup, stops the vehicle
- * has passed, and anything before the cutoff; then sorts by effective time
- * and applies the limit.
+ * has passed, and anything before the cutoff; then sorts by effective time,
+ * keeps each trip's next visit only (loop routes stop here twice), and applies
+ * the limit.
  */
 export function selectUpcoming(
   arrivals: MergedArrival[],
   cutoffEpochS: number,
   limit: number,
 ): MergedArrival[] {
+  const seenTrips = new Set<string>();
   return arrivals
     .filter(
       (a) =>
@@ -207,12 +235,19 @@ export function selectUpcoming(
         a.effectiveTime >= cutoffEpochS,
     )
     .sort((a, b) => a.effectiveTime - b.effectiveTime || a.tripId.localeCompare(b.tripId))
+    .filter((a) => {
+      const key = `${a.tripId}|${a.serviceDate ?? ''}`;
+      if (seenTrips.has(key)) return false;
+      seenTrips.add(key);
+      return true;
+    })
     .slice(0, limit);
 }
 
 export function toArrivalResponse(arrival: MergedArrival): ArrivalResponse {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { effectiveTime, scheduledEpoch, routeType, pickupType, passed, ...response } = arrival;
+  const { effectiveTime, scheduledEpoch, serviceDate, routeType, pickupType, passed, ...response } =
+    arrival;
   return response;
 }
 

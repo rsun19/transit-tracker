@@ -61,12 +61,18 @@ export function parseAlerts(
   return alerts;
 }
 
-/** Picks the English translation (language "en" or unset), never just the first one. */
+/**
+ * Picks the English translation ("en", then a regional tag like "en-US", then
+ * an untagged one), never just the first one.
+ */
 function englishText(text: transit_realtime.ITranslatedString | null | undefined): string {
   const translations = text?.translation ?? [];
+  const lang = (t: transit_realtime.TranslatedString.ITranslation) =>
+    optionalString(t, 'language')?.toLowerCase() ?? null;
   const english =
-    translations.find((t) => optionalString(t, 'language')?.toLowerCase() === 'en') ??
-    translations.find((t) => !optionalString(t, 'language'));
+    translations.find((t) => lang(t) === 'en') ??
+    translations.find((t) => lang(t)?.startsWith('en-')) ??
+    translations.find((t) => lang(t) === null);
   return english?.text ?? '';
 }
 

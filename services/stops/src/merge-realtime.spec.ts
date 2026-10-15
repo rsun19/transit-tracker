@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import type { StopRealtime, TripRealtime } from '@transit-tracker/shared';
+import { tripRealtimeField, type StopRealtime, type TripRealtime } from '@transit-tracker/shared';
 import {
   addedTripStopAt,
   mergeRealtime,
@@ -60,7 +60,9 @@ function trip(stops: StopRealtime[], overrides: Partial<TripRealtime> = {}): Tri
   };
 }
 
-const realtime = (...trips: TripRealtime[]) => new Map(trips.map((t) => [t.tripId, t]));
+/** Keyed by hash field, as the ingestion worker writes them. */
+const realtime = (...trips: TripRealtime[]) =>
+  new Map(trips.map((t) => [tripRealtimeField(t.tripId, t.startDate), t]));
 
 describe('mergeRealtime()', () => {
   it('matches by stop_sequence when the realtime stop_id is a child platform', () => {
@@ -131,6 +133,19 @@ describe('mergeRealtime()', () => {
     expect(a.hasRealtime).toBe(false);
   });
 
+  it("picks the realtime for the row's service day when the trip_id runs on two days", () => {
+    const rt = realtime(
+      trip([stop({ departureTime: NOW + 30 })], { startDate: '20261013' }),
+      trip([stop({ departureTime: NOW + 700 })], { startDate: '20261014' }),
+    );
+    const [yesterday, today] = mergeRealtime(
+      [row({ serviceDate: '20261013' }), row({ serviceDate: '20261014' })],
+      rt,
+    );
+    expect(yesterday.predictedTime).toBe(iso(NOW + 30));
+    expect(today.predictedTime).toBe(iso(NOW + 700));
+  });
+
   it('applies realtime with no start date to any service day', () => {
     const [a] = mergeRealtime(
       [row({ serviceDate: '20261013' })],
@@ -180,6 +195,47 @@ describe('mergeRealtime()', () => {
       realtime(trip([stop({ stopSequence: 5, departureTime: NOW + 900 })])),
     );
     expect(a.passed).toBe(true);
+  });
+
+  it('does not treat stops before leading NO_DATA stops as passed', () => {
+    // NO_DATA stops arrive with no times; the vehicle hasn't reached them.
+    const [a] = mergeRealtime(
+      [row({ stopSequence: 2 })],
+      realtime(
+        trip([
+          stop({ stopSequence: 1 }),
+          stop({ stopSequence: 2 }),
+          stop({ stopSequence: 3, departureTime: NOW + 900 }),
+        ]),
+      ),
+    );
+    expect(a).toMatchObject({ passed: false, hasRealtime: false, status: 'scheduled' });
+  });
+
+  it('propagates the delay of the previous listed stop to an unlisted one', () => {
+    const [a] = mergeRealtime(
+      [row({ stopSequence: 4 })],
+      realtime(
+        trip([
+          stop({ stopSequence: 2, delay: 120 }),
+          stop({ stopSequence: 3, skipped: true }),
+          stop({ stopSequence: 6, delay: 300 }),
+        ]),
+      ),
+    );
+    expect(a).toMatchObject({
+      hasRealtime: true,
+      predictedTime: iso(NOW + 720),
+      realtimeDelaySeconds: 120,
+    });
+  });
+
+  it('does not propagate a delay past a NO_DATA stop', () => {
+    const [a] = mergeRealtime(
+      [row({ stopSequence: 4 })],
+      realtime(trip([stop({ stopSequence: 2, delay: 120 }), stop({ stopSequence: 3 })])),
+    );
+    expect(a.hasRealtime).toBe(false);
   });
 
   it('reads uncertainty', () => {
@@ -233,6 +289,25 @@ describe('selectUpcoming()', () => {
       ),
     );
     expect(selectUpcoming(merged, cutoff, 10).map((a) => a.tripId)).toEqual(['ok']);
+  });
+
+  it('keeps only the next visit of a trip that stops here twice (loop route)', () => {
+    const merged = mergeRealtime(
+      [
+        row({ stopSequence: 5, scheduledDeparture: NOW - 2400 }),
+        row({ stopSequence: 25, scheduledDeparture: NOW + 600 }),
+        row({ stopSequence: 40, scheduledDeparture: NOW + 1800 }),
+      ],
+      realtime(
+        trip([
+          stop({ stopSequence: 20, departureTime: NOW + 300 }),
+          stop({ stopSequence: 25, departureTime: NOW + 660 }),
+        ]),
+      ),
+    );
+    const upcoming = selectUpcoming(merged, cutoff, 10);
+    expect(upcoming).toHaveLength(1);
+    expect(upcoming[0]).toMatchObject({ predictedTime: iso(NOW + 660) });
   });
 
   it('sorts by effective time (not time + delay) and applies the limit after merging', () => {

@@ -1,11 +1,11 @@
 /// <reference types="jest" />
 import { transit_realtime } from 'gtfs-realtime-bindings';
 import { parseTripUpdates } from './parse-trip-updates';
-import { FEED_TIMESTAMP as T, STATIC_TRIP_IDS, tripUpdatesFeed } from './__fixtures__/feeds';
+import { FEED_TIMESTAMP as T, STATIC_TRIPS, tripUpdatesFeed } from './__fixtures__/feeds';
 
 describe('parseTripUpdates()', () => {
-  const parsed = parseTripUpdates(tripUpdatesFeed(), STATIC_TRIP_IDS);
-  const scheduled = parsed.tripUpdates.get('T-SCHED')!;
+  const parsed = parseTripUpdates(tripUpdatesFeed(), STATIC_TRIPS);
+  const scheduled = parsed.tripUpdates.get('T-SCHED@20261014')!;
   const stopAt = (seq: number) => scheduled.stops.find((s) => s.stopSequence === seq)!;
 
   it('reads the feed header timestamp', () => {
@@ -56,8 +56,16 @@ describe('parseTripUpdates()', () => {
     });
   });
 
-  it('drops NO_DATA stops so the reader falls back to the schedule', () => {
-    expect(scheduled.stops.find((s) => s.stopSequence === 5)).toBeUndefined();
+  it('keeps NO_DATA stops with no times, so the reader uses the schedule there', () => {
+    expect(stopAt(5)).toEqual({
+      stopSequence: 5,
+      stopId: '70069',
+      arrivalTime: null,
+      departureTime: null,
+      delay: null,
+      skipped: false,
+      uncertainty: null,
+    });
   });
 
   it('reads uncertainty', () => {
@@ -66,7 +74,7 @@ describe('parseTripUpdates()', () => {
   });
 
   it('orders stops by stop_sequence', () => {
-    expect(scheduled.stops.map((s) => s.stopSequence)).toEqual([1, 2, 3, 4]);
+    expect(scheduled.stops.map((s) => s.stopSequence)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('writes CANCELED trips with canceled: true and no stops', () => {
@@ -88,6 +96,21 @@ describe('parseTripUpdates()', () => {
     expect(parsed.addedTrips.get('T-UNKNOWN')).toMatchObject({ routeId: 'Orange', directionId: 1 });
   });
 
+  it('stores a DUPLICATED trip under trip_id + start_time, with the route from static GTFS', () => {
+    expect(parsed.tripUpdates.get('T-SCHED@20261014')!.stops[0].departureTime).toBe(T + 60);
+    expect(parsed.addedTrips.get('T-SCHED@20261014#25:10:00')).toMatchObject({
+      tripId: 'T-SCHED',
+      routeId: 'Red',
+      directionId: 0,
+      stops: [{ departureTime: T + 900 }],
+    });
+  });
+
+  it('keeps the same trip_id on two service days apart', () => {
+    expect(parsed.tripUpdates.get('T-OVERNIGHT@20261013')!.stops[0].arrivalTime).toBe(T + 30);
+    expect(parsed.tripUpdates.get('T-OVERNIGHT@20261014')!.stops[0].arrivalTime).toBe(T + 3000);
+  });
+
   it('skips added trips with no route_id', () => {
     expect(parsed.addedTrips.has('T-ADDED-NO-ROUTE')).toBe(false);
   });
@@ -100,7 +123,7 @@ describe('parseTripUpdates()', () => {
   });
 
   it('counts trip updates, added, canceled and skipped stops', () => {
-    expect(parsed.stats).toEqual({ tripUpdates: 1, added: 2, canceled: 1, skippedStops: 1 });
+    expect(parsed.stats).toEqual({ tripUpdates: 3, added: 3, canceled: 1, skippedStops: 1 });
   });
 
   it('falls back to now when the feed has no header timestamp', () => {
@@ -116,7 +139,7 @@ describe('parseTripUpdates()', () => {
         },
       ],
     });
-    const result = parseTripUpdates(feed, STATIC_TRIP_IDS, 42);
+    const result = parseTripUpdates(feed, STATIC_TRIPS, 42);
     expect(result.feedTimestamp).toBeNull();
     expect(result.tripUpdates.get('T-SCHED')!.feedTimestamp).toBe(42);
     expect(result.tripUpdates.get('T-SCHED')!.stops[0].stopSequence).toBeNull();

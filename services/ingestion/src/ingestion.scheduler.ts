@@ -48,10 +48,19 @@ export class IngestionScheduler implements OnModuleInit {
       for (const agency of agencies) {
         try {
           await this.gtfsStaticService.ingestAgency(agency);
-          await this.staticLookup.refresh(agency.key);
         } catch (err: unknown) {
           this.logger.error(
             `Static ingestion failed for agency "${agency.key}": ${(err as Error).message}`,
+            (err as Error).stack,
+          );
+          continue;
+        }
+        try {
+          await this.staticLookup.refresh(agency.key);
+        } catch (err: unknown) {
+          // The lookup is dropped and reloaded on the next realtime poll.
+          this.logger.error(
+            `Static lookup refresh failed for agency "${agency.key}": ${(err as Error).message}`,
             (err as Error).stack,
           );
         }

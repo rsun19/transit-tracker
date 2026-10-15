@@ -12,10 +12,11 @@ function decode(object: Record<string, unknown>): transit_realtime.FeedMessage {
 const header = { gtfsRealtimeVersion: '2.0', incrementality: 'FULL_DATASET', timestamp: T };
 
 /**
- * One trip each for SCHEDULED, CANCELED, ADDED, and a SCHEDULED trip_id that
- * isn't in static GTFS. The scheduled trip has a departure-only first stop on a
- * child platform, a stop with no delay, a SKIPPED stop, a stop with a delay,
- * and its updates out of stop_sequence order.
+ * One trip each for SCHEDULED, CANCELED, ADDED, DUPLICATED, and a SCHEDULED
+ * trip_id that isn't in static GTFS. The scheduled trip has a departure-only
+ * first stop on a child platform, a stop with no delay, a SKIPPED stop, a stop
+ * with a delay, a trailing NO_DATA stop, and its updates out of stop_sequence
+ * order. T-OVERNIGHT appears on two service days.
  */
 export const tripUpdatesFeed = (): transit_realtime.FeedMessage =>
   decode({
@@ -72,10 +73,41 @@ export const tripUpdatesFeed = (): transit_realtime.FeedMessage =>
           stopTimeUpdate: [{ stopSequence: 1, stopId: '70061', arrival: { time: T } }],
         },
       },
+      {
+        id: '6',
+        tripUpdate: {
+          trip: {
+            tripId: 'T-SCHED',
+            startDate: '20261014',
+            startTime: '25:10:00',
+            scheduleRelationship: 'DUPLICATED',
+          },
+          stopTimeUpdate: [{ stopSequence: 1, stopId: 'Alewife-01', departure: { time: T + 900 } }],
+        },
+      },
+      {
+        id: '7',
+        tripUpdate: {
+          trip: { tripId: 'T-OVERNIGHT', routeId: 'Red', startDate: '20261013' },
+          stopTimeUpdate: [{ stopSequence: 9, stopId: '70061', arrival: { time: T + 30 } }],
+        },
+      },
+      {
+        id: '8',
+        tripUpdate: {
+          trip: { tripId: 'T-OVERNIGHT', routeId: 'Red', startDate: '20261014' },
+          stopTimeUpdate: [{ stopSequence: 1, stopId: '70061', arrival: { time: T + 3000 } }],
+        },
+      },
     ],
   });
 
-export const STATIC_TRIP_IDS: ReadonlySet<string> = new Set(['T-SCHED', 'T-CANCEL']);
+export const STATIC_TRIPS: ReadonlyMap<string, { routeId: string; directionId: number | null }> =
+  new Map([
+    ['T-SCHED', { routeId: 'Red', directionId: 0 }],
+    ['T-CANCEL', { routeId: 'Red', directionId: 0 }],
+    ['T-OVERNIGHT', { routeId: 'Red', directionId: 1 }],
+  ]);
 
 export const alertsFeed = (): transit_realtime.FeedMessage =>
   decode({
@@ -102,6 +134,12 @@ export const alertsFeed = (): transit_realtime.FeedMessage =>
         alert: {
           informedEntity: [{ stopId: '70063' }, { trip: { tripId: 'T-SCHED', routeId: 'Red' } }],
           headerText: { translation: [{ text: 'Solo español', language: 'es' }] },
+          descriptionText: {
+            translation: [
+              { text: 'Servicio', language: 'es' },
+              { text: 'US English only', language: 'en-US' },
+            ],
+          },
         },
       },
     ],

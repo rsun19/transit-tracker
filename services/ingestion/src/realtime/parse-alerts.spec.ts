@@ -30,6 +30,10 @@ describe('parseAlerts()', () => {
     expect(spanishOnly.headerText).toBe('');
   });
 
+  it('accepts a regional English tag like en-US', () => {
+    expect(spanishOnly.descriptionText).toBe('US English only');
+  });
+
   it('maps effect and cause to their enum names', () => {
     expect(detour.effect).toBe('DETOUR');
     expect(detour.cause).toBe('CONSTRUCTION');

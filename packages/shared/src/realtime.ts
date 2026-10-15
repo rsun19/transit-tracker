@@ -59,10 +59,18 @@ export type ServiceAlert = {
   tripIds: string[];
 };
 
-/** Hash: trip_id -> JSON TripRealtime, for trips in static GTFS (including canceled ones). */
+/**
+ * Hash field for a trip: "trip_id@YYYYMMDD" when the feed gives a start date,
+ * else the bare trip_id. Keeps the same trip_id on two service days (overnight
+ * service) from overwriting each other.
+ */
+export const tripRealtimeField = (tripId: string, startDate: string | null): string =>
+  startDate ? `${tripId}@${startDate}` : tripId;
+
+/** Hash: tripRealtimeField -> JSON TripRealtime, for trips in static GTFS (including canceled ones). */
 export const tripUpdatesKey = (agencyKey: string): string => `trip_updates:v2:${agencyKey}`;
 
-/** Hash: trip_id -> JSON TripRealtime, for ADDED trips and trip_ids not in static GTFS. */
+/** Hash: unique per trip instance -> JSON TripRealtime, for ADDED/DUPLICATED trips and trip_ids not in static GTFS. */
 export const addedTripsKey = (agencyKey: string): string => `added_trips:v2:${agencyKey}`;
 
 /** String: JSON ServiceAlert[]. */
