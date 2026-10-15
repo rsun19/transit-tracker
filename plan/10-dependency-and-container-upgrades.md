@@ -34,7 +34,12 @@
 3. **10c:**
    - multi-stage `npm ci` → `npm prune --omit=dev` (or `npm ci --omit=dev --workspace <svc>` in the final stage);
    - `USER node`, `read_only: true` plus a `tmpfs: /tmp` where possible;
-   - pin **every** image by digest: each Dockerfile `FROM` (including `node:22-alpine` / `node:24-alpine`, in every stage) and every compose `image:` (`nginx`, `postgis`, `redis`, `certbot`). Keep the tag for readability, e.g. `FROM node:22-alpine@sha256:… # 22.x`. Dependabot's docker ecosystem (item 7) keeps the digests current;
+   - pin **every** image by digest: each Dockerfile `FROM` (including `node:22-alpine` / `node:24-alpine`, in every stage) and every compose `image:` (`nginx`, `postgis`, `redis`, `certbot`). Keep the tag in the reference for readability (`FROM node:22-alpine@sha256:…`). Any version note goes on its **own line above** the `FROM`: Dockerfiles only treat `#` as a comment at the start of a line, so a trailing `# 22.x` would be parsed as part of the instruction:
+     ```dockerfile
+     # node 22.x LTS, alpine
+     FROM node:22-alpine@sha256:… AS build
+     ```
+     In compose YAML, a trailing `# …` after `image:` is fine. Dependabot's docker ecosystem (item 7) keeps the digests current;
    - `mem_limit` per service.
 4. **DB role matrix.** Every service gets an explicit role, and none uses the superuser:
 

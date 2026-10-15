@@ -31,7 +31,11 @@
 4. **Hide `X-Powered-By`:** set `poweredByHeader: false` in `next.config.mjs` and `app.disable('x-powered-by')` (or `helmet()`) in each Nest `main.ts`.
 5. **TLS details:** `listen 443 ssl; http2 on;`, `ssl_session_cache shared:SSL:10m;`, and drop `ssl_prefer_server_ciphers on` (it has no effect with only modern protocols).
 6. **Re-resolve upstreams:** use the variable form `set $stops_upstream http://stops:3003; proxy_pass $stops_upstream;` in every location, to match the dev config. With a variable, `proxy_pass` doesn't append the URI automatically, so the locations need `$request_uri`.
-7. **Reduce duplication:** move the `proxy_set_header` lines into one `include proxy_common.conf;`.
+7. **Reduce duplication:** move the `proxy_set_header` lines into `nginx/snippets/proxy_common.conf`, and the security headers from item 3 into `nginx/snippets/security_headers.conf`. Reference them by absolute container path: `include /etc/nginx/snippets/proxy_common.conf;`. Mount the directory read-only **everywhere nginx runs**, at that same path:
+   - `docker-compose.yml` nginx service: add `- ./nginx/snippets:/etc/nginx/snippets:ro` next to the existing `./nginx.conf:/etc/nginx/nginx.conf:ro` (`docker-compose.yml:209`);
+   - `docker-compose.dev.yml`, if `nginx.dev.conf` uses the snippets;
+   - the CI `nginx -t` command below;
+   - the deploy `scp` source list (PR 11), so the snippets reach the server.
 
 ## Verify
 
@@ -39,4 +43,4 @@
 - From inside the frontend container, `wget -qO- http://nginx:8080/api/v1/agencies` works.
 - `curl -I https://www.trackthemetro.com` shows the new headers and no `Server: nginx/x.y` version.
 - The SSR stop page still renders; the map still loads tiles (CSP).
-- The nginx config passes `nginx -t` in CI (add this step). The config references `/etc/letsencrypt/live/...` certs and upstream hostnames, and neither exists in CI, so don't `exec` into a compose service there. Instead, generate a throwaway self-signed cert at that path and run `docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/ci-certs:/etc/letsencrypt:ro" --add-host stops:127.0.0.1 … nginx:<pinned> nginx -t`, adding one `--add-host` per upstream. On the server, use `docker compose exec -T nginx nginx -t` before `nginx -s reload`. `-T` is needed because there's no TTY over SSH.
+- The nginx config passes `nginx -t` in CI (add this step). The config references `/etc/letsencrypt/live/...` certs and upstream hostnames, and neither exists in CI, so don't `exec` into a compose service there. Instead, generate a throwaway self-signed cert at that path and run `docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" -v "$PWD/ci-certs:/etc/letsencrypt:ro" --add-host stops:127.0.0.1 … nginx:<pinned> nginx -t`, adding one `--add-host` per upstream. On the server, use `docker compose exec -T nginx nginx -t` before `nginx -s reload`. `-T` is needed because there's no TTY over SSH.
