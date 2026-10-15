@@ -27,7 +27,7 @@ export type ScheduledRow = {
 };
 
 /** An arrival plus the fields needed to filter and sort it; strip with toArrivalResponse. */
-export type MergedArrival = ArrivalResponse & {
+export type MergedArrival = Omit<ArrivalResponse, 'departureTime'> & {
   /** Time shown: predicted arrival (else departure), otherwise the schedule; epoch seconds. */
   effectiveTime: number;
   /**
@@ -275,7 +275,7 @@ export function toArrivalResponse(arrival: MergedArrival): ArrivalResponse {
     ...response
   } = arrival;
   /* eslint-enable @typescript-eslint/no-unused-vars */
-  return response;
+  return { ...response, departureTime: iso(leavesAt) };
 }
 
 /**

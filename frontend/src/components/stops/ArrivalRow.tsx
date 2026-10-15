@@ -10,27 +10,41 @@ interface ArrivalRowProps {
   arrival: Arrival;
 }
 
+// Same thresholds as mbta.com (mbta/dotcom upcoming_departures/processor.ex):
+// a delay or early arrival is only shown at 60 s or more, and a train
+// arriving within 30 s is "Arriving".
+const DELAY_THRESHOLD_S = 60;
+const ARRIVING_WITHIN_MS = 30_000;
+
 export function ArrivalRow({ arrival }: ArrivalRowProps) {
   const delay = arrival.realtimeDelaySeconds;
   const delayMinutes = delay !== null ? Math.round(delay / 60) : 0;
 
-  const isLate = arrival.hasRealtime && delay !== null && delayMinutes > 0;
-  const isEarly = arrival.hasRealtime && delay !== null && delayMinutes < 0;
-  const isOnTime = arrival.hasRealtime && delay !== null && delayMinutes === 0;
+  const isLate = arrival.hasRealtime && delay !== null && delay >= DELAY_THRESHOLD_S;
+  const isEarly = arrival.hasRealtime && delay !== null && delay <= -DELAY_THRESHOLD_S;
+  const isOnTime = arrival.hasRealtime && delay !== null && !isLate && !isEarly;
 
   // Use realtimeArrival directly (already computed by backend)
   const effectiveIso = arrival.realtimeArrival;
-  // Format as local time string (HH:MM), rounded to the nearest minute like
-  // MBTA does (toLocaleTimeString alone would truncate 8:08:58 to 8:08).
+  // Format as local time string (HH:MM). toLocaleTimeString truncates the
+  // seconds, which is what mbta.com does for clock times.
   let formattedTime = effectiveIso;
   try {
-    const roundedMs = Math.round(new Date(effectiveIso).getTime() / 60_000) * 60_000;
-    formattedTime = new Date(roundedMs).toLocaleTimeString([], {
+    formattedTime = new Date(effectiveIso).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
   } catch (e) {
     // If parsing fails, fall back to the ISO string
+  }
+
+  // A predicted train that has arrived but not left is boarding.
+  if (arrival.hasRealtime) {
+    const now = Date.now();
+    const arrivesAt = new Date(effectiveIso).getTime();
+    const leavesAt = new Date(arrival.departureTime ?? effectiveIso).getTime();
+    if (arrivesAt <= now && now <= leavesAt) formattedTime = 'Boarding';
+    else if (arrivesAt > now && arrivesAt - now <= ARRIVING_WITHIN_MS) formattedTime = 'Arriving';
   }
 
   const timeColor = isLate

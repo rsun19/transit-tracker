@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { isAlertActive } from '@transit-tracker/shared';
+import { isAlertActive, isUrgentAlert } from '@transit-tracker/shared';
 import { parseAlerts, type StopHierarchy } from './parse-alerts';
 import { FEED_TIMESTAMP as T, alertsFeed } from './__fixtures__/feeds';
 
@@ -32,6 +32,11 @@ describe('parseAlerts()', () => {
 
   it('accepts a regional English tag like en-US', () => {
     expect(spanishOnly.descriptionText).toBe('US English only');
+  });
+
+  it('reads severity level, defaulting to UNKNOWN_SEVERITY', () => {
+    expect(detour.severityLevel).toBe('SEVERE');
+    expect(spanishOnly.severityLevel).toBe('UNKNOWN_SEVERITY');
   });
 
   it('maps effect and cause to their enum names', () => {
@@ -87,5 +92,21 @@ describe('isAlertActive()', () => {
 
   it('is always active with no periods', () => {
     expect(isAlertActive(alwaysOn, 0)).toBe(true);
+  });
+});
+
+describe('isUrgentAlert()', () => {
+  it.each([
+    ['NO_SERVICE', 'WARNING', true],
+    ['SIGNIFICANT_DELAYS', 'WARNING', true],
+    ['DETOUR', 'INFO', true],
+    ['STOP_MOVED', 'INFO', true],
+    // MBTA files bus delays as OTHER_EFFECT + SEVERE.
+    ['OTHER_EFFECT', 'SEVERE', true],
+    ['OTHER_EFFECT', 'WARNING', false],
+    ['ACCESSIBILITY_ISSUE', 'WARNING', false],
+    ['UNKNOWN_EFFECT', undefined, false],
+  ])('%s / %s -> %s', (effect, severityLevel, urgent) => {
+    expect(isUrgentAlert({ effect, severityLevel })).toBe(urgent);
   });
 });

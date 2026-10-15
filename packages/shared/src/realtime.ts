@@ -48,6 +48,8 @@ export type ServiceAlert = {
   descriptionText: string;
   effect: string;
   cause: string;
+  /** GTFS-RT severity_level: SEVERE, WARNING, INFO or UNKNOWN_SEVERITY. Absent in data written before it was added. */
+  severityLevel?: string;
   activePeriods: AlertActivePeriod[];
   informedEntities: AlertInformedEntity[];
   routeIds: string[];
@@ -75,6 +77,26 @@ export const addedTripsKey = (agencyKey: string): string => `added_trips:v2:${ag
 
 /** String: JSON ServiceAlert[]. */
 export const alertsKey = (agencyKey: string): string => `alerts:${agencyKey}`;
+
+// Effects that change whether or where a rider can catch the service.
+const URGENT_EFFECTS = new Set([
+  'NO_SERVICE',
+  'REDUCED_SERVICE',
+  'SIGNIFICANT_DELAYS',
+  'DETOUR',
+  'MODIFIED_SERVICE',
+  'STOP_MOVED',
+]);
+
+/**
+ * True for alerts a rider needs to see right away: service disruptions, plus
+ * anything the agency marks SEVERE (MBTA files e.g. "Route 85 delays of about
+ * 25 minutes" as OTHER_EFFECT + SEVERE). Elevator, parking and general notices
+ * are not urgent.
+ */
+export function isUrgentAlert(alert: Pick<ServiceAlert, 'effect' | 'severityLevel'>): boolean {
+  return alert.severityLevel === 'SEVERE' || URGENT_EFFECTS.has(alert.effect);
+}
 
 /** An alert with no active periods is always active. */
 export function isAlertActive(

@@ -94,15 +94,58 @@ describe('late realtime arrival', () => {
 describe('time formatting', () => {
   const fmt = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  it('rounds to the nearest minute like MBTA (8:08:58 shows as 8:09)', () => {
-    const at = new Date(2026, 9, 15, 8, 8, 58);
+  it('truncates to the minute like mbta.com (8:09:51 shows as 8:09)', () => {
+    const at = new Date(2026, 9, 15, 8, 9, 51);
     wrap({ ...BASE, realtimeArrival: at.toISOString() });
     expect(screen.getByText(fmt(new Date(2026, 9, 15, 8, 9)))).toBeInTheDocument();
   });
+});
 
-  it('rounds down under 30 seconds (8:08:20 shows as 8:08)', () => {
-    const at = new Date(2026, 9, 15, 8, 8, 20);
-    wrap({ ...BASE, realtimeArrival: at.toISOString() });
-    expect(screen.getByText(fmt(new Date(2026, 9, 15, 8, 8)))).toBeInTheDocument();
+describe('delay threshold', () => {
+  it('shows On Time for a delay under 60 s (mbta.com shows no delay)', () => {
+    wrap({ ...BASE, hasRealtime: true, realtimeDelaySeconds: 50 });
+    expect(screen.getByText('On Time')).toBeInTheDocument();
+    expect(screen.queryByText(/\+1 min/)).not.toBeInTheDocument();
+  });
+
+  it('shows +1 min from 60 s late', () => {
+    wrap({ ...BASE, hasRealtime: true, realtimeDelaySeconds: 70 });
+    expect(screen.getByText('+1 min')).toBeInTheDocument();
+  });
+
+  it('shows early only from 60 s early', () => {
+    wrap({ ...BASE, hasRealtime: true, realtimeDelaySeconds: -45 });
+    expect(screen.queryByText(/early/)).not.toBeInTheDocument();
+  });
+});
+
+describe('boarding and arriving', () => {
+  const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+
+  it('shows Boarding while the train has arrived but not departed', () => {
+    wrap({
+      ...BASE,
+      hasRealtime: true,
+      realtimeDelaySeconds: 0,
+      realtimeArrival: iso(-20_000),
+      departureTime: iso(40_000),
+    });
+    expect(screen.getByText('Boarding')).toBeInTheDocument();
+  });
+
+  it('shows Arriving within 30 s of arrival', () => {
+    wrap({
+      ...BASE,
+      hasRealtime: true,
+      realtimeDelaySeconds: 0,
+      realtimeArrival: iso(20_000),
+      departureTime: iso(80_000),
+    });
+    expect(screen.getByText('Arriving')).toBeInTheDocument();
+  });
+
+  it('shows the clock time for a scheduled-only row, even when due', () => {
+    wrap({ ...BASE, realtimeArrival: iso(-10_000), departureTime: iso(30_000) });
+    expect(screen.queryByText('Boarding')).not.toBeInTheDocument();
   });
 });

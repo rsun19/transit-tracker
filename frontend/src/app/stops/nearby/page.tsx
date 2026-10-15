@@ -20,7 +20,7 @@ import {
 import { StopCard } from '@/components/stops/StopCard';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { AlertBanner } from '@/components/ui/AlertBanner';
+import { ServiceAlerts } from '@/components/ui/ServiceAlerts';
 
 const DEFAULT_AGENCY = 'mbta';
 const DEFAULT_RADIUS_M = 500;
@@ -144,18 +144,7 @@ export default function NearbyStopsPage() {
         </Box>
       )}
 
-      {alerts.length > 0 && (
-        <Box sx={{ mb: 2 }}>
-          {alerts.map((alert) => (
-            <AlertBanner
-              key={alert.alertId}
-              severity="warning"
-              title={alert.headerText}
-              message={alert.descriptionText}
-            />
-          ))}
-        </Box>
-      )}
+      <ServiceAlerts alerts={alerts} />
 
       {loading && <LoadingSkeleton count={5} />}
 
