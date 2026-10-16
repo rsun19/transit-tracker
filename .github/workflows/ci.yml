@@ -451,6 +451,13 @@ jobs:
               exit 1
             fi
 
+            # The ingestion worker owns the schema (TypeORM synchronize) and
+            # writes its liveness file only after the sync, so start it first:
+            # API services that query a newly added table then never see it
+            # missing. Non-fatal; the rest of the stack still comes up.
+            docker compose up -d --wait --wait-timeout 180 ingestion \
+              || echo "WARNING: ingestion did not report healthy — check its logs"
+
             docker compose up -d --remove-orphans
 
             # Reload nginx so it picks up any config changes and re-resolves
