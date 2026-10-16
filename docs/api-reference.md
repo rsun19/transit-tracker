@@ -323,34 +323,44 @@ All routes serving a stop.
 
 ### `GET /api/v1/trips/:tripId`
 
-Trip detail including the ordered stop sequence.
+Trip detail including the ordered stop sequence, with scheduled times expanded for one service day.
 
 **Path parameters**: `tripId` — GTFS `trip_id`  
-**Query parameters**: `agencyKey` (required)
+**Query parameters**:
+
+| Param         | Type   | Required | Description                                                                                                                                                                                              |
+| ------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agencyKey`   | string | Yes      | Agency                                                                                                                                                                                                   |
+| `serviceDate` | string | No       | `YYYYMMDD` service day. Default: the day the trip is running now in the agency timezone (yesterday's run while it may still be on the road, else today's), using `calendar.txt` and `calendar_dates.txt` |
 
 **Response 200**:
 
 ```json
 {
   "tripId": "63885441",
-  "agencyKey": "mbta",
+  "serviceDate": "20261016",
   "routeId": "Red",
   "headsign": "Ashmont",
-  "directionId": 0,
   "stops": [
     {
-      "stopId": "place-alfcl",
+      "sequence": 1,
+      "stopId": "70061",
       "stopName": "Alewife",
-      "stopSequence": 1,
-      "arrivalTime": "14:35:00",
-      "arrivalTime": "14:35:00"
+      "stopCode": null,
+      "lat": 42.3954,
+      "lon": -71.1424,
+      "scheduledArrival": "2026-10-16T18:35:00.000Z",
+      "realtimeArrival": "2026-10-16T18:35:00.000Z",
+      "scheduledDeparture": "2026-10-16T18:35:00.000Z"
     }
   ]
 }
 ```
 
-**Errors**: `404` if trip not found  
-**Cache**: 300 s
+`realtimeArrival` is the scheduled time; trip detail doesn't merge predictions yet.
+
+**Errors**: `400` if `serviceDate` isn't a valid `YYYYMMDD` date; `404` if the trip or agency is not found  
+**Cache**: 60 s
 
 ---
 

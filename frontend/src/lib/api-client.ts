@@ -93,6 +93,8 @@ export interface Arrival {
 
 export interface Trip {
   tripId: string;
+  /** YYYYMMDD service day the times are for. */
+  serviceDate: string;
   routeId: string;
   headsign: string | null;
   stops: TripStop[];

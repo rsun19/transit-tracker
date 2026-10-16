@@ -135,7 +135,25 @@ Service pattern schedule — which days of the week a service runs.
 
 **Indexes**: `UNIQUE (agency_id, service_id)`
 
-Ingestion also parses `calendar_dates.txt` to apply service exceptions (added/removed service days) updating these rows.
+A service is active on a date when the date is in `start_date..end_date` with that weekday set, unless `service_calendar_dates` removes it; `service_calendar_dates` can also add it on a date with no calendar row. The SQL for this lives in one place, `activeServicesCte` in `packages/shared/src/service-day.ts`.
+
+### `service_calendar_dates`
+
+Service exceptions from `calendar_dates.txt`: holidays, special event days, shuttle and diversion services.
+
+| Column           | Type           | Constraints                                      |
+| ---------------- | -------------- | ------------------------------------------------ |
+| `id`             | `UUID`         | `PRIMARY KEY`                                    |
+| `agency_id`      | `UUID`         | `NOT NULL REFERENCES agencies ON DELETE CASCADE` |
+| `service_id`     | `VARCHAR(100)` | `NOT NULL`                                       |
+| `date`           | `DATE`         | `NOT NULL`                                       |
+| `exception_type` | `SMALLINT`     | `NOT NULL` — `1` added, `2` removed              |
+
+**Indexes**: `UNIQUE (agency_id, service_id, date)`, `INDEX (agency_id, date)`
+
+### Stop times on a service day
+
+GTFS stop times (which can be ≥ `24:00:00`) are measured from noon minus 12 h on the service date, not from midnight. They become timestamps through `gtfsTimestampSql` in `packages/shared/src/service-day.ts`, so times before 02:00 and past midnight stay right on DST change days. "Today" and "yesterday" are calendar dates in the agency timezone (`candidateServiceDates`), never the database server's `CURRENT_DATE`.
 
 ### `route_stops` (precomputed — populated during ingestion)
 
@@ -203,6 +221,7 @@ agencies ──< routes ──< trips ──< stop_times >── stops
 agencies ──< stops
 agencies ──< shapes
 agencies ──< service_calendars
+agencies ──< service_calendar_dates
 
 --- Precomputed (populated during ingestion) ---
 route_stops (stop_id → route_id, with parent expansion)
@@ -234,6 +253,7 @@ Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpda
 | `cache:route:v2:{agencyKey}:{routeId}`                   | 300 s | —                                                     |
 | `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
 | `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`          | 45 s  | —                                                     |
+| `cache:trip:{agencyKey}:{tripId}:{serviceDate\|current}` | 60 s  | —                                                     |
 
 `{lat3dp}` and `{lon3dp}` are latitude/longitude rounded to 3 decimal places (~100 m precision) to improve cache hit rate for nearby-stop queries from slightly different coordinates.
 
@@ -251,7 +271,7 @@ Order of operations:
 4. INSERT routes, stops, trips (500-row batches, committed immediately)
 5. Stream-insert shapes (500-row batches)
 6. Stream-insert stop_times (1000-row batches)
-7. INSERT service_calendars (500-row batches)
+7. INSERT service_calendars and service_calendar_dates
 8. `UPDATE agencies SET last_ingested_at = NOW()`
 
 Because there is no wrapping transaction, a mid-ingest crash leaves the table partially populated. The worker will retry on the next scheduled cron run (default: 04:00 daily) or on the next startup if `GTFS_INGEST_ON_STARTUP=true`. No other agency's rows are touched.

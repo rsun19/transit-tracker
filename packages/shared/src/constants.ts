@@ -25,6 +25,9 @@ export const ARRIVAL_PAST_GRACE_S = 30;
 // |predicted - scheduled| below this counts as on time.
 export const ARRIVAL_ON_TIME_THRESHOLD_S = 60;
 export const API_CACHE_ROUTES_TTL_S = 3600;
+// Trip detail is keyed by service date, or "current" when the caller gives
+// none; short enough that "current" moves to today's run within a minute.
+export const API_CACHE_TRIP_TTL_S = 60;
 export const API_CACHE_NEARBY_TTL_S = 45;
 export const REALTIME_POLL_INTERVAL_MS = 15_000;
 export const DEFAULT_SEARCH_LIMIT = 20;

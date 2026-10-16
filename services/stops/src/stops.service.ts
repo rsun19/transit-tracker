@@ -14,7 +14,10 @@ import {
   MAX_SEARCH_LIMIT,
   NEARBY_DEFAULT_RADIUS_M,
   NEARBY_MAX_RADIUS_M,
+  activeServicesCte,
   addedTripsKey,
+  candidateServiceDates,
+  gtfsTimestampSql,
   tripRealtimeField,
   tripUpdatesKey,
   type TripRealtime,
@@ -37,35 +40,16 @@ import { StopRouteRef, StopResponse, ArrivalResponse, AddedTripEntry } from './s
 // Placeholders are passed in because the two arrival queries number their
 // parameters differently.
 
-const todayServicesCte = (agency: string, today: string, yesterday: string) => `
-  today_services AS MATERIALIZED (
-    SELECT sc.service_id, sc.agency_id, cand.d
-    FROM service_calendars sc
-    CROSS JOIN (VALUES (${today}::date), (${yesterday}::date)) AS cand(d)
-    WHERE sc.agency_id = ${agency}
-      AND sc.start_date <= cand.d
-      AND sc.end_date   >= cand.d
-      AND CASE EXTRACT(DOW FROM cand.d)::int
-            WHEN 0 THEN sc.sunday
-            WHEN 1 THEN sc.monday
-            WHEN 2 THEN sc.tuesday
-            WHEN 3 THEN sc.wednesday
-            WHEN 4 THEN sc.thursday
-            WHEN 5 THEN sc.friday
-            WHEN 6 THEN sc.saturday
-          END = true
-  )`;
-
 /** Scheduled arrival (else departure) as timestamptz; the time shown to riders. */
 const scheduledTs = (tz: string) =>
-  `((ts.d + COALESCE(st.arrival_time, st.departure_time))::timestamp AT TIME ZONE ${tz})`;
+  gtfsTimestampSql('ts.d', 'COALESCE(st.arrival_time, st.departure_time)', tz);
 
 const scheduledColumns = (tz: string) => `
   st.trip_id, t.route_id, r.short_name, r.long_name, r.route_type, t.trip_headsign,
   t.direction_id, st.stop_id, s.parent_station_id, st.stop_sequence, st.pickup_type,
   to_char(ts.d, 'YYYYMMDD') AS service_date,
-  EXTRACT(EPOCH FROM (ts.d + st.arrival_time)::timestamp AT TIME ZONE ${tz})::float8 AS sched_arrival,
-  EXTRACT(EPOCH FROM (ts.d + st.departure_time)::timestamp AT TIME ZONE ${tz})::float8 AS sched_departure,
+  EXTRACT(EPOCH FROM ${gtfsTimestampSql('ts.d', 'st.arrival_time', tz)})::float8 AS sched_arrival,
+  EXTRACT(EPOCH FROM ${gtfsTimestampSql('ts.d', 'st.departure_time', tz)})::float8 AS sched_departure,
   ${scheduledTs(tz)} AS sched_ts`;
 
 const scheduledJoins = `
@@ -348,9 +332,7 @@ export class StopsService {
       }
     }
 
-    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
-    const todayStr = dateFmt.format(new Date());
-    const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
+    const { today: todayStr, yesterday: yesterdayStr } = candidateServiceDates(timezone);
 
     // Without `after`, look back ARRIVALS_LATE_WINDOW_S so trips running late
     // are still candidates; the merge drops the ones that have really gone.
@@ -364,7 +346,7 @@ export class StopsService {
     // realtime merge, since predictions can reorder them. Every visit is kept
     // (loop routes stop here twice); selectUpcoming keeps each trip's next one.
     const sqlRows = await this.dataSource.query<ScheduledSqlRow[]>(
-      `WITH ${todayServicesCte('$2', '$3', '$4')},
+      `WITH ${activeServicesCte('$2', ['$3', '$4'])},
        candidates AS (
          SELECT ${scheduledColumns('$5')}
          FROM stop_times st
@@ -753,9 +735,7 @@ export class StopsService {
     agencyId: string,
     timezone: string,
   ): Promise<Map<string, ArrivalResponse>> {
-    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
-    const todayStr = dateFmt.format(new Date());
-    const yesterdayStr = dateFmt.format(new Date(Date.now() - 86_400_000));
+    const { today: todayStr, yesterday: yesterdayStr } = candidateServiceDates(timezone);
     const nowS = Date.now() / 1000;
     const cutoffS = nowS - ARRIVAL_PAST_GRACE_S;
 
@@ -763,7 +743,7 @@ export class StopsService {
     // may still be coming) plus the next few scheduled ones. Same merge rules
     // as getArrivals.
     const sqlRows = await this.dataSource.query<Array<ScheduledSqlRow & { group_stop_id: string }>>(
-      `WITH ${todayServicesCte('$2', '$3', '$4')},
+      `WITH ${activeServicesCte('$2', ['$3', '$4'])},
        expanded_stops AS MATERIALIZED (
          SELECT stop_id AS parent_stop_id, stop_id AS effective_stop_id
          FROM stops WHERE stop_id = ANY($1) AND agency_id = $2
