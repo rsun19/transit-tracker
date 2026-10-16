@@ -57,6 +57,12 @@ interface GtfsCalendar {
   end_date: string;
 }
 
+interface GtfsCalendarDate {
+  service_id: string;
+  date: string;
+  exception_type: string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _fetch: any;
 async function getFetch() {
@@ -131,6 +137,9 @@ export class GtfsStaticService {
         await queryRunner.query(`DELETE FROM routes WHERE agency_id = $1`, [agencyId]);
         await queryRunner.query(`DELETE FROM shapes WHERE agency_id = $1`, [agencyId]);
         await queryRunner.query(`DELETE FROM service_calendars WHERE agency_id = $1`, [agencyId]);
+        await queryRunner.query(`DELETE FROM service_calendar_dates WHERE agency_id = $1`, [
+          agencyId,
+        ]);
         await queryRunner.query(`DELETE FROM route_stops WHERE agency_id = $1`, [agencyId]);
         await queryRunner.query(`DELETE FROM route_branches WHERE agency_id = $1`, [agencyId]);
 
@@ -160,6 +169,13 @@ export class GtfsStaticService {
           agencyId,
           async (rows: GtfsCalendar[]) => {
             await this.batchInsertCalendars(agencyId, rows, queryRunner);
+          },
+        );
+        await this.importCsvWithCopy(
+          path.join(tempDir, 'calendar_dates.txt'),
+          agencyId,
+          async (rows: GtfsCalendarDate[]) => {
+            await this.batchInsertCalendarDates(agencyId, rows, queryRunner);
           },
         );
 
@@ -299,6 +315,7 @@ export class GtfsStaticService {
         this.dataSource.query(`ANALYZE stops`),
         this.dataSource.query(`ANALYZE routes`),
         this.dataSource.query(`ANALYZE service_calendars`),
+        this.dataSource.query(`ANALYZE service_calendar_dates`),
         this.dataSource.query(`ANALYZE route_stops`),
         this.dataSource.query(`ANALYZE route_branches`),
       ]);
@@ -539,6 +556,39 @@ export class GtfsStaticService {
       await queryRunner.query(
         `INSERT INTO service_calendars (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date) VALUES ${placeholders.join(', ')}
          ON CONFLICT (agency_id, service_id) DO UPDATE SET monday = EXCLUDED.monday, tuesday = EXCLUDED.tuesday, wednesday = EXCLUDED.wednesday, thursday = EXCLUDED.thursday, friday = EXCLUDED.friday, saturday = EXCLUDED.saturday, sunday = EXCLUDED.sunday, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date`,
+        params,
+      );
+    }
+  }
+
+  private async batchInsertCalendarDates(
+    agencyId: string,
+    calendarDates: GtfsCalendarDate[],
+    queryRunner: import('typeorm').QueryRunner,
+  ): Promise<void> {
+    // Only 1 (added) and 2 (removed) are defined; anything else is ignored.
+    const valid = calendarDates.filter(
+      (c) => c.service_id && /^\d{8}$/.test(c.date) && ['1', '2'].includes(c.exception_type),
+    );
+    if (valid.length < calendarDates.length) {
+      this.logger.warn(
+        `Skipped ${calendarDates.length - valid.length} malformed calendar_dates rows for agency ${agencyId}`,
+      );
+    }
+    const cols = 4;
+    const chunkSize = Math.floor(65535 / cols);
+    for (let i = 0; i < valid.length; i += chunkSize) {
+      const chunk = valid.slice(i, i + chunkSize);
+      const placeholders: string[] = [];
+      const params: unknown[] = [];
+      for (const c of chunk) {
+        const n = params.length + 1;
+        placeholders.push(`($${n}, $${n + 1}, $${n + 2}, $${n + 3})`);
+        params.push(agencyId, c.service_id, c.date, Number(c.exception_type));
+      }
+      await queryRunner.query(
+        `INSERT INTO service_calendar_dates (agency_id, service_id, date, exception_type) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (agency_id, service_id, date) DO UPDATE SET exception_type = EXCLUDED.exception_type`,
         params,
       );
     }
