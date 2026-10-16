@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { fetchStopArrivals, fetchAlerts } from '@/lib/api-client';
+import { fetchStopArrivals, fetchAlerts, fetchStopRouteIds } from '@/lib/api-client';
 
 const StopArrivalsClient = dynamic(() => import('./StopArrivalsClient'), { ssr: false });
 
@@ -11,16 +11,20 @@ export default async function StopArrivalsPage({ params }: ServerProps) {
   const stopId = decodeURIComponent(params.stopId);
 
   try {
-    const [arrData, alertsData] = await Promise.all([
+    // Routes serving the stop (cached for a day) let the alerts include
+    // line-wide ones, e.g. "Red Line: delays of about 20 minutes".
+    const [arrData, routeIds] = await Promise.all([
       fetchStopArrivals(stopId, DEFAULT_AGENCY),
-      fetchAlerts({ stopId, agencyKey: DEFAULT_AGENCY }),
+      fetchStopRouteIds(stopId, DEFAULT_AGENCY).catch(() => [] as string[]),
     ]);
+    const alertsData = await fetchAlerts({ stopId, routeIds, agencyKey: DEFAULT_AGENCY });
     return (
       <StopArrivalsClient
         initialArrivals={arrData.data}
         initialAlerts={alertsData.alerts}
         initialStopName={arrData.stopName || stopId}
         stopId={stopId}
+        routeIds={routeIds}
       />
     );
   } catch (err: unknown) {

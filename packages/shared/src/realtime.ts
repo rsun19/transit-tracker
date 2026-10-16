@@ -48,6 +48,12 @@ export type ServiceAlert = {
   descriptionText: string;
   effect: string;
   cause: string;
+  /**
+   * GTFS-RT effect_detail, the agency's finer category (MBTA: DELAY,
+   * SUSPENSION, SHUTTLE, ELEVATOR_CLOSURE, PARKING_ISSUE, ...). MBTA files
+   * delays as effect OTHER_EFFECT, so this is what identifies them.
+   */
+  effectDetail?: string | null;
   /** GTFS-RT severity_level: SEVERE, WARNING, INFO or UNKNOWN_SEVERITY. Absent in data written before it was added. */
   severityLevel?: string;
   activePeriods: AlertActivePeriod[];
@@ -88,14 +94,40 @@ const URGENT_EFFECTS = new Set([
   'STOP_MOVED',
 ]);
 
+// effect_detail values that are disruptions even when `effect` is generic.
+const URGENT_EFFECT_DETAILS = new Set([
+  'DELAY',
+  'SUSPENSION',
+  'SHUTTLE',
+  'CANCELLATION',
+  'STATION_CLOSURE',
+  'STOP_CLOSURE',
+  'TRACK_CHANGE',
+]);
+
 /**
- * True for alerts a rider needs to see right away: service disruptions, plus
- * anything the agency marks SEVERE (MBTA files e.g. "Route 85 delays of about
- * 25 minutes" as OTHER_EFFECT + SEVERE). Elevator, parking and general notices
- * are not urgent.
+ * True for alerts a rider needs to see right away: service disruptions
+ * (by effect or effect_detail), plus anything the agency marks SEVERE.
+ * Elevator, escalator, parking and general notices are not urgent.
  */
-export function isUrgentAlert(alert: Pick<ServiceAlert, 'effect' | 'severityLevel'>): boolean {
-  return alert.severityLevel === 'SEVERE' || URGENT_EFFECTS.has(alert.effect);
+export function isUrgentAlert(
+  alert: Pick<ServiceAlert, 'effect' | 'effectDetail' | 'severityLevel'>,
+): boolean {
+  return (
+    alert.severityLevel === 'SEVERE' ||
+    URGENT_EFFECTS.has(alert.effect) ||
+    (alert.effectDetail != null && URGENT_EFFECT_DETAILS.has(alert.effectDetail))
+  );
+}
+
+/** True if an alert names the route as a whole (not just one stop or trip on it). */
+export function isRouteWideAlert(
+  alert: Pick<ServiceAlert, 'informedEntities'>,
+  routeIds: ReadonlySet<string>,
+): boolean {
+  return (alert.informedEntities ?? []).some(
+    (ie) => ie.routeId !== null && routeIds.has(ie.routeId) && !ie.stopId && !ie.tripId,
+  );
 }
 
 /** An alert with no active periods is always active. */

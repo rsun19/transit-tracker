@@ -15,6 +15,7 @@ import {
 import { transit_realtime } from 'gtfs-realtime-bindings';
 import { parseTripUpdates } from './realtime/parse-trip-updates';
 import { parseAlerts } from './realtime/parse-alerts';
+import { readAlertEffectDetails } from './realtime/effect-detail';
 import { writeTripUpdates } from './realtime/write-trip-updates';
 import { optionalEpoch } from './realtime/proto';
 
@@ -61,6 +62,15 @@ export class GtfsRealtimeService {
     url: string,
     label: string,
   ): Promise<transit_realtime.FeedMessage | null> {
+    const raw = await this.fetchFeedBytes(agency, url, label);
+    return raw && transit_realtime.FeedMessage.decode(raw);
+  }
+
+  private async fetchFeedBytes(
+    agency: ResolvedAgency,
+    url: string,
+    label: string,
+  ): Promise<Uint8Array | null> {
     const headers = agencyAuthHeaders(agency);
     const response = await (
       await getFetch()
@@ -75,8 +85,7 @@ export class GtfsRealtimeService {
       this.logger.warn(`${label} poll returned ${response.status} for ${agency.key}`);
       return null;
     }
-    const buffer = await response.arrayBuffer();
-    return transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   /**
@@ -194,11 +203,13 @@ export class GtfsRealtimeService {
   private async pollAlerts(agency: ResolvedAgency): Promise<void> {
     const label = 'Alerts';
     try {
-      const feed = await this.fetchFeed(agency, agency.gtfsRealtimeAlertsUrl!, label);
-      if (!feed || !this.isFeedFresh(feed, agency, label)) return;
+      const raw = await this.fetchFeedBytes(agency, agency.gtfsRealtimeAlertsUrl!, label);
+      if (!raw) return;
+      const feed = transit_realtime.FeedMessage.decode(raw);
+      if (!this.isFeedFresh(feed, agency, label)) return;
 
       const lookup = await this.staticLookup.get(agency.key);
-      const alerts = parseAlerts(feed, lookup?.stops ?? null);
+      const alerts = parseAlerts(feed, lookup?.stops ?? null, readAlertEffectDetails(raw));
 
       // Written even when empty, so cleared alerts disappear right away.
       await this.cacheService

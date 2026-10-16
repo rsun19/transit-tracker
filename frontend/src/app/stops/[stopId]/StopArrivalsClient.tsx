@@ -21,6 +21,8 @@ type StopArrivalsClientProps = {
   initialAlerts: Alert[];
   initialStopName: string;
   stopId: string;
+  /** Routes serving the stop, for line-wide alerts. */
+  routeIds: string[];
 };
 
 export default function StopArrivalsClient({
@@ -28,6 +30,7 @@ export default function StopArrivalsClient({
   initialAlerts,
   initialStopName,
   stopId,
+  routeIds,
 }: StopArrivalsClientProps) {
   const [arrivals, setArrivals] = useState<Arrival[]>(initialArrivals);
   const [stopName, setStopName] = useState<string>(initialStopName);
@@ -43,7 +46,7 @@ export default function StopArrivalsClient({
       try {
         const [arrData, alertsData] = await Promise.all([
           fetchStopArrivals(stopId, DEFAULT_AGENCY),
-          fetchAlerts({ stopId, agencyKey: DEFAULT_AGENCY }),
+          fetchAlerts({ stopId, routeIds, agencyKey: DEFAULT_AGENCY }),
         ]);
         if (!isMounted) return;
         // Sort arrivals by .realtimeArrival ascending before setting state
@@ -76,6 +79,8 @@ export default function StopArrivalsClient({
       isMounted = false;
       clearInterval(interval);
     };
+    // routeIds comes from the server render and doesn't change for a stop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopId]);
 
   // Drop arrivals whose vehicle has already left. A train that has arrived
