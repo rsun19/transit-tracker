@@ -124,8 +124,15 @@ Push to `main` → CI runs all checks → deploy job:
 
 1. Updates `IMAGE_TAG` in server `.env` to the new git SHA
 2. Runs `docker compose pull` to fetch new images
-3. Runs `docker compose up -d --remove-orphans`
-4. Prunes old images
+3. Runs `docker compose up -d --wait ingestion`: the one-shot `migrate` service applies pending schema migrations (and exits), then the worker starts
+4. Runs `docker compose up -d --remove-orphans`
+5. Prunes old images
+
+`routes`, `stops` and `ingestion` start only after `migrate` exits successfully. If a migration fails, they keep running their previous containers; `docker compose logs migrate` shows why.
+
+### Schema migrations
+
+The schema is owned by TypeORM migrations in `packages/shared/src/migrations/` (listed in `MIGRATIONS`). No service uses `synchronize`. The first migration, `Baseline`, is the production schema as of October 2026: on a database that already has it, it only records itself as run. Take a `pg_dump` before deploying a release that adds a migration.
 
 No manual intervention needed. nginx stays up during rolling restarts because `depends_on: service_healthy` ensures containers are ready before traffic is routed.
 

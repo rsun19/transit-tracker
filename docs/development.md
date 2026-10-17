@@ -251,6 +251,26 @@ No code changes and no image rebuild needed — the worker reads `agencies.json`
 
 ---
 
+## Changing the Database Schema
+
+Schema changes are migrations, never entity edits alone (no service runs `synchronize`):
+
+1. Change the entity in `packages/shared/src/entities/`.
+2. Add `packages/shared/src/migrations/<timestamp>-<Name>.ts` with the SQL (use `IF NOT EXISTS` where it helps), and append it to `MIGRATIONS` in `migrations/index.ts`.
+3. Run the migration tests against a scratch PostGIS. They fail if the entities and the migrated schema disagree:
+
+```sh
+docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=pw postgis/postgis:16-3.4-alpine
+cd services/ingestion
+TEST_DATABASE_URL=postgres://postgres:pw@localhost:55432/postgres npx jest integration --runInBand
+```
+
+Indexes TypeORM can't express (expression or GIN indexes) are declared on the entity with `@Index('name', { synchronize: false })` so the drift check ignores them.
+
+The `migrate` compose service runs pending migrations before the worker and API services start, in both compose files.
+
+---
+
 ## Stopping and Resetting
 
 ```sh

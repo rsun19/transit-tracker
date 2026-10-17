@@ -135,7 +135,6 @@ export class GtfsStaticService {
       checkRequiredFiles(present);
 
       const agencyId = await this.upsertAgency(agency);
-      await this.ensureSchema();
 
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -239,47 +238,6 @@ export class GtfsStaticService {
       ],
     );
     return row.agencyId;
-  }
-
-  /** Derived tables and indexes that aren't TypeORM entities. Idempotent. */
-  private async ensureSchema(): Promise<void> {
-    await this.dataSource.query(`
-      CREATE TABLE IF NOT EXISTS route_stops (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-        stop_id VARCHAR(100) NOT NULL,
-        route_id VARCHAR(100) NOT NULL,
-        short_name VARCHAR(50),
-        long_name TEXT,
-        route_type SMALLINT NOT NULL,
-        UNIQUE (agency_id, stop_id, route_id)
-      )`);
-    await this.dataSource.query(`
-      CREATE TABLE IF NOT EXISTS route_branches (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        agency_id UUID NOT NULL REFERENCES agencies("agencyId") ON DELETE CASCADE,
-        route_id VARCHAR(100) NOT NULL,
-        direction_id SMALLINT,
-        trip_headsign TEXT,
-        trip_id VARCHAR(100) NOT NULL,
-        shape_id VARCHAR(100),
-        stop_count INTEGER NOT NULL
-      )`);
-    const indexes = [
-      `CREATE INDEX IF NOT EXISTS idx_route_stops_agency_stop ON route_stops (agency_id, stop_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_route_branches_agency_route ON route_branches (agency_id, route_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_stops_stop_name_trgm ON stops USING gin (stop_name gin_trgm_ops)`,
-      `CREATE INDEX IF NOT EXISTS idx_stops_stop_code_trgm ON stops USING gin (stop_code gin_trgm_ops)`,
-      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_stop_dept ON stop_times (agency_id, stop_id, departure_time)`,
-      `CREATE INDEX IF NOT EXISTS idx_stop_times_agency_trip_seq ON stop_times (agency_id, trip_id, stop_sequence)`,
-    ];
-    for (const sql of indexes) {
-      await this.dataSource
-        .query(sql)
-        .catch((err: unknown) =>
-          this.logger.warn(`Index creation failed (${sql}): ${(err as Error).message}`),
-        );
-    }
   }
 
   private async createStagingTables(queryRunner: QueryRunner): Promise<void> {

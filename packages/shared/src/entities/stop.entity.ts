@@ -12,6 +12,12 @@ import { Agency } from './agency.entity';
 
 @Entity('stops')
 @Unique(['agencyId', 'stopId'])
+// Indexes TypeORM can't express (expression, GIN opclass) or that predate it;
+// created by migrations, and left alone by the schema diff.
+@Index('idx_stops_location_geography', { synchronize: false })
+@Index('idx_stops_agency_parent_station', { synchronize: false })
+@Index('idx_stops_stop_name_trgm', { synchronize: false })
+@Index('idx_stops_stop_code_trgm', { synchronize: false })
 @Index(['agencyId', 'stopCode'])
 export class Stop {
   @PrimaryGeneratedColumn('uuid')

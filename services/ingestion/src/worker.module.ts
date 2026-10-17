@@ -50,7 +50,8 @@ import { StaticLookupService } from './static-lookup.service';
           ServiceCalendar,
           ServiceCalendarDate,
         ],
-        synchronize: true,
+        // The schema is owned by migrations (src/migrate.ts), never synchronize.
+        synchronize: false,
         logging: false,
       }),
     }),

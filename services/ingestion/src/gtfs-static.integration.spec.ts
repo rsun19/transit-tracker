@@ -20,6 +20,7 @@ import {
   type ResolvedAgency,
 } from '@transit-tracker/shared';
 import { GtfsStaticService } from './gtfs-static.service';
+import { migrationDataSource } from './migrate';
 import { FEED, feedEntries } from './static/__fixtures__/gtfs';
 import { makeZip } from './static/__fixtures__/zip';
 
@@ -65,15 +66,16 @@ describeDb('GtfsStaticService against PostGIS', () => {
     const admin = new DataSource({ type: 'postgres', url: DB_URL });
     await admin.initialize();
     await admin.query(`DROP SCHEMA public CASCADE; CREATE SCHEMA public`);
-    for (const ext of ['postgis', 'pg_trgm', 'pgcrypto', '"uuid-ossp"']) {
-      await admin.query(`CREATE EXTENSION IF NOT EXISTS ${ext}`);
-    }
     await admin.destroy();
+
+    const migrator = migrationDataSource(DB_URL!);
+    await migrator.initialize();
+    await migrator.runMigrations();
+    await migrator.destroy();
 
     dataSource = new DataSource({
       type: 'postgres',
       url: DB_URL,
-      synchronize: true,
       entities: [Agency, Route, Stop, StopTime, Trip, Shape, ServiceCalendar, ServiceCalendarDate],
     });
     await dataSource.initialize();
