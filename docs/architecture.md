@@ -130,10 +130,14 @@ The `getArrivals` endpoint performs a matching neighbor lookup via PostGIS `ST_D
 
 ### Ingestion Worker
 
-NestJS standalone application sharing the same codebase as the API. Runs two scheduled jobs:
+NestJS standalone application sharing the same codebase as the API. Runs two scheduled jobs, registered at startup from validated config (`GTFS_STATIC_CRON`, `GTFS_REALTIME_POLL_INTERVAL_MS`):
 
-- **`@Cron(GTFS_STATIC_CRON)`** — downloads the agency's GTFS static ZIP, validates it, parses all CSV files, and writes to PostgreSQL in a `SERIALIZABLE` transaction (DELETE-then-INSERT scoped by `agency_id`)
-- **`@Interval(15 000)`** — fetches the GTFS-RT protobuf feed, decodes it, filters vehicle positions against known `trip_id` values, and writes to Redis with a 30 s TTL
+- **Static cron (`GTFS_STATIC_CRON`)** — downloads the agency's GTFS static ZIP, validates it, parses all CSV files, and writes to PostgreSQL in a `SERIALIZABLE` transaction (DELETE-then-INSERT scoped by `agency_id`)
+- **Realtime poll (`GTFS_REALTIME_POLL_INTERVAL_MS`, default 15 s)** — fetches the GTFS-RT protobuf feed, decodes it, filters vehicle positions against known `trip_id` values, and writes to Redis with a 30 s TTL
+
+Liveness: each completed realtime poll loop touches `WORKER_FILE_LIVENESS_PATH`; the compose healthcheck requires it to be under 2 minutes old. Docker doesn't restart unhealthy containers, so the worker also exits itself when the loop hasn't completed for 3 minutes, and the `unless-stopped` policy restarts it. A loop that completes with upstream feed errors still counts as alive, so an MBTA outage doesn't cause restarts.
+
+Static downloads time out after 5 minutes and are capped at 200 MB.
 
 The worker is a separate container (`Dockerfile.worker`) so it can be scaled or restarted independently without affecting the API.
 

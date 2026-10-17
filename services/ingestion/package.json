@@ -18,6 +18,7 @@
     "@nestjs/schedule": "^4.0.0",
     "@nestjs/typeorm": "^10.0.0",
     "@transit-tracker/shared": "file:../../packages/shared",
+    "cron": "3.2.1",
     "csv-parser": "^3.0.0",
     "gtfs-realtime-bindings": "^1.1.1",
     "ioredis": "^5.3.2",

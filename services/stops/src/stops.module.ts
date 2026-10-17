@@ -4,8 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Stop, StopTime, Route, Trip, Agency, configSchema } from '@transit-tracker/shared';
 import { StopsController } from './stops.controller';
 import { StopsService } from './stops.service';
-import { CacheModule } from './cache/cache.module';
-import { HealthController } from './health.controller';
+import { CacheModule, HealthController } from '@transit-tracker/shared/nest';
 
 @Module({
   imports: [

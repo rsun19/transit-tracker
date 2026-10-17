@@ -8,7 +8,7 @@ import {
   candidateServiceDates,
   gtfsTimestampSql,
 } from '@transit-tracker/shared';
-import { CacheService } from './cache/cache.service';
+import { CacheService } from '@transit-tracker/shared/nest';
 
 export interface TripStopResponse {
   sequence: number;

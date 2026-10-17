@@ -44,10 +44,10 @@ Add one variable per agency that requires an API key. The name must match the `a
 
 ### Runtime
 
-| Variable                    | Default             | Description                                                                                           |
-| --------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                  | `development`       | Set to `production` for Docker deployments. Controls NestJS and Next.js optimizations.                |
-| `WORKER_FILE_LIVENESS_PATH` | `/tmp/worker-alive` | Path to the file the worker touches on each successful ingestion cycle. Used by Docker `HEALTHCHECK`. |
+| Variable                    | Default             | Description                                                                                                                                                                                |
+| --------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV`                  | `development`       | Set to `production` for Docker deployments. Controls NestJS and Next.js optimizations.                                                                                                     |
+| `WORKER_FILE_LIVENESS_PATH` | `/tmp/worker-alive` | Path to the file the worker touches each time a realtime poll loop completes. The compose healthcheck requires it to be under 2 minutes old; the worker exits after 3 minutes without one. |
 
 ---
 
@@ -118,7 +118,7 @@ These values are compiled into the shared library. To change them, edit `package
 | `ARRIVAL_ON_TIME_THRESHOLD_S` | `60`    | `abs(predicted - scheduled)` below this is `on_time`; otherwise `late` / `early`.                   |
 | `API_CACHE_NEARBY_TTL_S`      | `45`    | TTL for nearby-stops spatial query results.                                                         |
 | `API_CACHE_ROUTES_TTL_S`      | `300`   | TTL for route list and individual route responses.                                                  |
-| `REALTIME_POLL_INTERVAL_MS`   | `15000` | Interval between GTFS-Realtime feed polls (milliseconds).                                           |
+| `REALTIME_POLL_INTERVAL_MS`   | `15000` | Fallback realtime poll interval when `GTFS_REALTIME_POLL_INTERVAL_MS` isn't usable.                 |
 | `DEFAULT_SEARCH_LIMIT`        | `20`    | Default page size for list endpoints that support `limit`.                                          |
 | `MAX_SEARCH_LIMIT`            | `100`   | Maximum allowed value for `limit` query parameter.                                                  |
 | `NEARBY_DEFAULT_RADIUS_M`     | `500`   | Default search radius (metres) for `/stops/nearby`.                                                 |

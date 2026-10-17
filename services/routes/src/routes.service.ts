@@ -8,7 +8,7 @@ import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
 } from '@transit-tracker/shared';
-import { CacheService } from './cache/cache.service';
+import { CacheService } from '@transit-tracker/shared/nest';
 
 export interface GeoJsonLineString {
   type: 'LineString';

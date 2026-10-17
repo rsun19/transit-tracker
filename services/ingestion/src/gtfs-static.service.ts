@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as unzipper from 'unzipper';
 import { pipeline } from 'stream/promises';
 import { createReadStream } from 'fs';
+import { Transform } from 'stream';
 import csvParser from 'csv-parser';
 import { from as copyFrom } from 'pg-copy-streams';
 import type { Pool, PoolClient } from 'pg';
@@ -63,6 +64,11 @@ interface GtfsCalendarDate {
   exception_type: string;
 }
 
+// The static zip is about 25 MB; these only stop a hung or runaway download
+// from blocking ingestion (and filling the disk) indefinitely.
+export const STATIC_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+export const STATIC_DOWNLOAD_MAX_BYTES = 200 * 1024 * 1024;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _fetch: any;
 async function getFetch() {
@@ -70,6 +76,18 @@ async function getFetch() {
     _fetch = (await import('node-fetch')).default;
   }
   return _fetch;
+}
+
+/** Passes bytes through, failing the stream once more than `maxBytes` have gone by. */
+export function byteLimit(maxBytes: number): Transform {
+  let seen = 0;
+  return new Transform({
+    transform(chunk: Buffer, _enc, callback) {
+      seen += chunk.length;
+      if (seen > maxBytes) callback(new Error(`Download exceeded ${maxBytes} bytes`));
+      else callback(null, chunk);
+    },
+  });
 }
 
 @Injectable()
@@ -341,10 +359,23 @@ export class GtfsStaticService {
     dest: string,
     headers: Record<string, string>,
   ): Promise<void> {
-    const response = await (await getFetch())(url, { headers });
+    // The signal also aborts a body that stalls part way through.
+    const response = await (
+      await getFetch()
+    )(url, {
+      headers,
+      signal: AbortSignal.timeout(STATIC_DOWNLOAD_TIMEOUT_MS),
+    });
     if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-    const fileStream = fs.createWriteStream(dest);
-    await pipeline(response.body as unknown as NodeJS.ReadableStream, fileStream);
+    const declared = Number(response.headers.get('content-length'));
+    if (declared > STATIC_DOWNLOAD_MAX_BYTES) {
+      throw new Error(`Download too large: ${declared} bytes (limit ${STATIC_DOWNLOAD_MAX_BYTES})`);
+    }
+    await pipeline(
+      response.body as unknown as NodeJS.ReadableStream,
+      byteLimit(STATIC_DOWNLOAD_MAX_BYTES),
+      fs.createWriteStream(dest),
+    );
   }
 
   private async extractZip(zipPath: string, destDir: string): Promise<void> {

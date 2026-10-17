@@ -23,7 +23,7 @@ import {
   tripUpdatesKey,
   type TripRealtime,
 } from '@transit-tracker/shared';
-import { CacheService } from './cache/cache.service';
+import { CacheService } from '@transit-tracker/shared/nest';
 import { reconcileAddedTrips } from './reconcileAddedTrips';
 import {
   addedTripStopAt,
