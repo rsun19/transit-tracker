@@ -109,8 +109,9 @@ export function checkRowCounts(
  *    staged ones and bump agencies.data_version.
  *
  * Any failure before the commit leaves the live data untouched. Temp tables
- * are dropped at the end and are private to the session, so a crashed or
- * concurrent load can't leak rows into another.
+ * are dropped at the end and are private to the session, and a per-agency
+ * advisory lock makes a second, concurrent load of the same agency skip, so
+ * two loads can't interleave their swaps.
  */
 @Injectable()
 export class GtfsStaticService {
@@ -138,6 +139,20 @@ export class GtfsStaticService {
 
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
+      // One load per agency at a time, across processes. Two swaps of the same
+      // agency could otherwise interleave and leave a mix of both feeds.
+      const lockKey = `gtfs-static:${agencyId}`;
+      const [{ locked }] = (await queryRunner.query(
+        `SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`,
+        [lockKey],
+      )) as Array<{ locked: boolean }>;
+      if (!locked) {
+        await queryRunner.release();
+        this.logger.warn(
+          `Skipping static ingestion for ${agency.key}: another load of it is in progress`,
+        );
+        return;
+      }
       try {
         await this.createStagingTables(queryRunner);
 
@@ -160,6 +175,12 @@ export class GtfsStaticService {
         await this.dropStagingTables(queryRunner).catch((err: unknown) =>
           this.logger.warn(`Failed to drop staging tables: ${(err as Error).message}`),
         );
+        // Session-level lock: release it before the connection goes back to the pool.
+        await queryRunner
+          .query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [lockKey])
+          .catch((err: unknown) =>
+            this.logger.warn(`Failed to release load lock: ${(err as Error).message}`),
+          );
         await queryRunner.release();
       }
 

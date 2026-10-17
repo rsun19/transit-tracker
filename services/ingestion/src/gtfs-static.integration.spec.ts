@@ -205,4 +205,44 @@ describeDb('GtfsStaticService against PostGIS', () => {
     expect(duringLoad).toEqual(before);
     expect(await count('trips')).toBe(5);
   });
+
+  it('skips a second load of the same agency while one is in progress', async () => {
+    const before = await snapshot();
+    serve({ 'trips.txt': FEED['trips.txt'] + 'R1,WKDY,T6,Main St,1,SH1,1\n' });
+
+    // Hold the first load just before its swap, then start a second one.
+    let releaseFirst!: () => void;
+    const held = new Promise<void>((r) => (releaseFirst = r));
+    let firstStaged!: () => void;
+    const staged = new Promise<void>((r) => (firstStaged = r));
+    const first = new GtfsStaticService(dataSource);
+    const f = first as unknown as { swapIn: (...a: unknown[]) => Promise<void> };
+    const realSwap = f.swapIn.bind(first);
+    f.swapIn = async (...args) => {
+      firstStaged();
+      await held;
+      return realSwap(...args);
+    };
+    const firstLoad = first.ingestAgency(agency);
+    await staged;
+
+    const second = new GtfsStaticService(dataSource);
+    const swapSpy = jest.spyOn(second as unknown as { swapIn: () => Promise<void> }, 'swapIn');
+    const warn = jest.spyOn(Logger.prototype, 'warn');
+    await second.ingestAgency(agency);
+    expect(swapSpy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('another load of it is in progress'));
+    expect(await snapshot()).toEqual(before);
+
+    releaseFirst();
+    await firstLoad;
+    expect(await count(`trips WHERE trip_id = 'T6'`)).toBe(1);
+
+    // The lock was released: the next load runs normally.
+    serve({ 'trips.txt': FEED['trips.txt'] + 'R1,WKDY,T6,Main St,1,SH1,1\n' });
+    const third = new GtfsStaticService(dataSource);
+    const thirdSwap = jest.spyOn(third as unknown as { swapIn: () => Promise<void> }, 'swapIn');
+    await third.ingestAgency(agency);
+    expect(thirdSwap).toHaveBeenCalledTimes(1);
+  });
 });
