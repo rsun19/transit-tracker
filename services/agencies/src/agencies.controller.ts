@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { AgenciesService } from './agencies.service';
+import { AgenciesService } from '@transit-tracker/shared/nest';
 
 @Controller('api/v1/agencies')
 export class AgenciesController {

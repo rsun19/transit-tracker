@@ -6,8 +6,8 @@ import {
   isUrgentAlert,
   type ServiceAlert,
 } from '@transit-tracker/shared';
-import { CacheService } from './cache/cache.service';
-import { AgenciesService } from './agencies/agencies.service';
+import { CacheService } from '@transit-tracker/shared/nest';
+import { AgenciesService } from '@transit-tracker/shared/nest';
 
 /**
  * Route ids from the `routeIds` query value: comma-separated, possibly

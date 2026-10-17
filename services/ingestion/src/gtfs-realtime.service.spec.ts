@@ -2,7 +2,7 @@
 import { transit_realtime } from 'gtfs-realtime-bindings';
 import type { ResolvedAgency } from '@transit-tracker/shared';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
-import type { CacheService } from './cache/cache.service';
+import type { CacheService } from '@transit-tracker/shared/nest';
 import type { StaticLookupService } from './static-lookup.service';
 
 const NOW = 1_792_000_000;

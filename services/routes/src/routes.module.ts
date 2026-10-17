@@ -6,8 +6,7 @@ import { RoutesController } from './routes.controller';
 import { RoutesService } from './routes.service';
 import { TripsController } from './trips.controller';
 import { TripsService } from './trips.service';
-import { CacheModule } from './cache/cache.module';
-import { HealthController } from './health.controller';
+import { CacheModule, HealthController } from '@transit-tracker/shared/nest';
 
 @Module({
   imports: [

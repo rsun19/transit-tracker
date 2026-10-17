@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Module, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { loadAgencyConfigs, type ResolvedAgency } from '@transit-tracker/shared';
+import { loadAgencyConfigs, type ResolvedAgency } from '../agency-config';
 
+/** Agencies from the AGENCY_CONFIG_PATH JSON file, loaded once at startup. */
 @Injectable()
 export class AgenciesService implements OnModuleInit {
   private readonly logger = new Logger(AgenciesService.name);
@@ -24,3 +25,9 @@ export class AgenciesService implements OnModuleInit {
     return this.agencies.find((a) => a.key === key);
   }
 }
+
+@Module({
+  providers: [AgenciesService],
+  exports: [AgenciesService],
+})
+export class AgenciesModule {}

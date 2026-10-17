@@ -26,15 +26,27 @@ All error responses use:
 
 ## Health
 
-### `GET /health`
+### `GET /health`, `GET /health/live`
 
-Backend liveness probe. Used by the Docker Compose `healthcheck`.
+Service liveness: the process is up. `/health` is kept as an alias for nginx and existing checks.
 
 **Response 200**:
 
 ```json
 { "status": "ok", "uptime": 12345 }
 ```
+
+### `GET /health/ready`
+
+Service readiness, used by the Docker Compose `healthcheck` of every API service: Redis answers `PING` and, for services with a database (routes, stops), Postgres answers `SELECT 1`, each within 2 s.
+
+**Response 200**:
+
+```json
+{ "status": "ok", "checks": { "redis": "up", "db": "up" } }
+```
+
+**Response 503**: `{ "error": "Not ready: redis down", "statusCode": 503 }`
 
 ### `GET /api/health`
 

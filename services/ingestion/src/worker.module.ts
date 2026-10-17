@@ -13,8 +13,8 @@ import {
   ServiceCalendarDate,
   configSchema,
 } from '@transit-tracker/shared';
-import { CacheModule } from './cache/cache.module';
-import { AgenciesModule } from './agencies/agencies.module';
+import { AgenciesModule, CacheModule } from '@transit-tracker/shared/nest';
+import { WorkerLivenessService } from './worker-liveness.service';
 import { GtfsStaticService } from './gtfs-static.service';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
 import { IngestionScheduler } from './ingestion.scheduler';
@@ -68,6 +68,12 @@ import { StaticLookupService } from './static-lookup.service';
     CacheModule,
     AgenciesModule,
   ],
-  providers: [GtfsStaticService, GtfsRealtimeService, StaticLookupService, IngestionScheduler],
+  providers: [
+    GtfsStaticService,
+    GtfsRealtimeService,
+    StaticLookupService,
+    IngestionScheduler,
+    WorkerLivenessService,
+  ],
 })
 export class WorkerModule {}

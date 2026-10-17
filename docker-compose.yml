@@ -26,7 +26,11 @@ services:
 
   cache:
     image: redis:7.2-alpine
-    command: redis-server --save 60 1 --loglevel warning
+    # Realtime keys are rebuilt every poll and the rest is response cache, so no
+    # persistence. allkeys-lru can evict realtime keys too; readers already fall
+    # back to the schedule when a key is missing, and the next poll rewrites it.
+    command: >
+      redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --loglevel warning
     volumes:
       - cache_data:/data
     healthcheck:
@@ -51,7 +55,7 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health/ready || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -76,7 +80,7 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health/ready || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -101,7 +105,7 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health/ready || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -124,7 +128,7 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health/ready || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -147,7 +151,7 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health/ready || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -174,7 +178,9 @@ services:
       cache:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'test -f /tmp/worker-alive || exit 1']
+      # Touched after every completed realtime poll; the worker also exits
+      # itself after 3 min without one, so the restart policy recovers it.
+      test: ['CMD-SHELL', 'find /tmp/worker-alive -mmin -2 | grep -q .']
       interval: 30s
       timeout: 5s
       retries: 3

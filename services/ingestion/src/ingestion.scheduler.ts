@@ -1,11 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Cron, Interval } from '@nestjs/schedule';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
+import { CronJob } from 'cron';
 import { REALTIME_POLL_INTERVAL_MS } from '@transit-tracker/shared';
-import { AgenciesService } from './agencies/agencies.service';
+import { AgenciesService } from '@transit-tracker/shared/nest';
 import { GtfsStaticService } from './gtfs-static.service';
 import { GtfsRealtimeService } from './gtfs-realtime.service';
 import { StaticLookupService } from './static-lookup.service';
+import { WorkerLivenessService } from './worker-liveness.service';
 
 @Injectable()
 export class IngestionScheduler implements OnModuleInit {
@@ -19,9 +21,13 @@ export class IngestionScheduler implements OnModuleInit {
     private readonly gtfsStaticService: GtfsStaticService,
     private readonly gtfsRealtimeService: GtfsRealtimeService,
     private readonly staticLookup: StaticLookupService,
+    private readonly schedulerRegistry: SchedulerRegistry,
+    private readonly liveness: WorkerLivenessService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    this.registerSchedules();
+
     const ingestOnStartup = this.configService.get<string>('GTFS_INGEST_ON_STARTUP') === 'true';
     if (!ingestOnStartup) {
       this.logger.log(
@@ -33,7 +39,26 @@ export class IngestionScheduler implements OnModuleInit {
     setTimeout(() => void this.runStaticIngestion(), 5000);
   }
 
-  @Cron(process.env['GTFS_STATIC_CRON'] ?? '0 4 * * *')
+  /**
+   * Registers the realtime poll and static cron from validated config.
+   * (Decorators would read them at import time, before config is loaded.)
+   */
+  private registerSchedules(): void {
+    const intervalMs =
+      Number(this.configService.get('GTFS_REALTIME_POLL_INTERVAL_MS')) || REALTIME_POLL_INTERVAL_MS;
+    this.schedulerRegistry.addInterval(
+      'realtime-poll',
+      setInterval(() => void this.runRealtimePoll(), intervalMs),
+    );
+
+    const cron = this.configService.get<string>('GTFS_STATIC_CRON') ?? '0 4 * * *';
+    const job = new CronJob(cron, () => void this.runStaticIngestion());
+    this.schedulerRegistry.addCronJob('static-ingestion', job);
+    job.start();
+
+    this.logger.log(`Realtime poll every ${intervalMs} ms; static ingestion cron "${cron}"`);
+  }
+
   async runStaticIngestion(): Promise<void> {
     if (this.isStaticIngestionRunning) {
       this.logger.warn(
@@ -70,7 +95,6 @@ export class IngestionScheduler implements OnModuleInit {
     }
   }
 
-  @Interval(REALTIME_POLL_INTERVAL_MS)
   async runRealtimePoll(): Promise<void> {
     if (this.isRealtimePollRunning) {
       this.logger.warn('Skipping realtime poll tick because a previous run is still in progress');
@@ -92,6 +116,7 @@ export class IngestionScheduler implements OnModuleInit {
       }
     } finally {
       this.isRealtimePollRunning = false;
+      this.liveness.markAlive();
     }
   }
 }
