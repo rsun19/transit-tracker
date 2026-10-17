@@ -16,3 +16,5 @@ export {
 } from './agency-config';
 export * from './realtime';
 export * from './service-day';
+export { ENTITIES } from './database';
+export { MIGRATIONS } from './migrations';

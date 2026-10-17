@@ -42,6 +42,20 @@ services:
 
   # ── Microservices ──────────────────────────────────────────────
 
+  # One-shot: applies pending schema migrations, then exits. Services that use
+  # the database start only once it has succeeded. Same image as ingestion.
+  migrate:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-ingestion:${IMAGE_TAG:-latest}
+    command: ['node', 'dist/migrate.js']
+    environment:
+      NODE_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
   agencies:
     image: ghcr.io/${REGISTRY_OWNER:-local}/transit-tracker-agencies:${IMAGE_TAG:-latest}
     build:
@@ -75,6 +89,8 @@ services:
     env_file:
       - .env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:
@@ -100,6 +116,8 @@ services:
     env_file:
       - .env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:
@@ -173,6 +191,8 @@ services:
     env_file:
       - .env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:

@@ -165,6 +165,8 @@ export class StopsService {
 
     const routesByStopId = new Map<string, StopRouteRef[]>();
     if (stopRows.length > 0) {
+      // (agency, stop) pairs, so the (agency_id, stop_id) index applies.
+      const agencyIdList = stopRows.map((r) => r.agency_id);
       const stopIdList = stopRows.map((r) => r.stop_id);
       const routeRows = await this.dataSource.query<
         Array<{
@@ -183,9 +185,10 @@ export class StopsService {
                 rs.long_name AS "longName",
                 rs.route_type AS "routeType"
          FROM route_stops rs
-         WHERE rs.stop_id = ANY($1)
+         JOIN unnest($1::uuid[], $2::text[]) AS k(agency_id, stop_id)
+           ON rs.agency_id = k.agency_id AND rs.stop_id = k.stop_id
          ORDER BY rs.stop_id, rs.short_name ASC`,
-        [stopIdList],
+        [agencyIdList, stopIdList],
       );
       for (const row of routeRows) {
         const key = `${row.agency_id}:${row.group_stop_id}`;
@@ -646,6 +649,8 @@ export class StopsService {
 
     const routesByStopId = new Map<string, StopRouteRef[]>();
     if (rows.length > 0) {
+      // (agency, stop) pairs, so the (agency_id, stop_id) index applies.
+      const agencyIdList = rows.map((r) => r.agency_id);
       const stopIdList = rows.map((r) => r.stop_id);
       const routeRows = await this.dataSource.query<
         Array<{
@@ -664,9 +669,10 @@ export class StopsService {
                 rs.long_name AS "longName",
                 rs.route_type AS "routeType"
          FROM route_stops rs
-         WHERE rs.stop_id = ANY($1)
+         JOIN unnest($1::uuid[], $2::text[]) AS k(agency_id, stop_id)
+           ON rs.agency_id = k.agency_id AND rs.stop_id = k.stop_id
          ORDER BY rs.stop_id, rs.short_name ASC`,
-        [stopIdList],
+        [agencyIdList, stopIdList],
       );
       for (const row of routeRows) {
         const key = `${row.agency_id}:${row.group_stop_id}`;

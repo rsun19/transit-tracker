@@ -79,6 +79,8 @@ services:
       AGENCY_CONFIG_PATH: /app/config/agencies.json
       PORT: 3002
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:
@@ -105,6 +107,8 @@ services:
       AGENCY_CONFIG_PATH: /app/config/agencies.json
       PORT: 3003
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:
@@ -159,6 +163,28 @@ services:
         condition: service_healthy
     command: npm run start:dev
 
+  # One-shot: applies pending schema migrations, then exits.
+  migrate:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+      target: development
+    volumes:
+      - ./services/ingestion:/app/services/ingestion
+      - /app/services/ingestion/node_modules
+      - ./packages/shared:/app/packages/shared
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - ./package.json:/app/package.json
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npx nest build && node dist/migrate.js"
+    restart: 'no'
+
   ingestion:
     build:
       context: .
@@ -178,6 +204,8 @@ services:
       REDIS_URL: redis://cache:6379
       AGENCY_CONFIG_PATH: /app/config/agencies.json
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       cache:
