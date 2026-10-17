@@ -9,6 +9,23 @@ import {
 import { CacheService } from './cache/cache.service';
 import { AgenciesService } from './agencies/agencies.service';
 
+/**
+ * Route ids from the `routeIds` query value: comma-separated, possibly
+ * repeated (`?routeIds=a&routeIds=b,c` parses to an array). Anything that
+ * isn't a string, such as `routeIds[x]=y` objects, is ignored.
+ */
+export function parseRouteIdsParam(value: unknown): Set<string> {
+  const parts = Array.isArray(value) ? value : [value];
+  return new Set(
+    parts
+      .filter((p): p is string => typeof p === 'string')
+      .flatMap((p) => p.split(','))
+      .map((r) => r.trim())
+      .filter(Boolean)
+      .slice(0, 100),
+  );
+}
+
 @Controller('api/v1/alerts')
 export class AlertsController {
   constructor(
@@ -23,7 +40,7 @@ export class AlertsController {
     @Query('stopId') stopId?: string,
     // Comma-separated routes serving `stopId`; adds their line-wide alerts
     // (e.g. "Red Line: delays of about 20 minutes") to the stop's own.
-    @Query('routeIds') routeIdsParam?: string,
+    @Query('routeIds') routeIdsParam?: unknown,
   ) {
     const agencies = agencyKey
       ? [this.agenciesService.getAgencyByKey(agencyKey)].filter(Boolean)
@@ -50,13 +67,7 @@ export class AlertsController {
     // The worker widens stopIds to each informed stop's parent station and
     // child platforms, so an exact match here covers both levels.
     if (stopId) {
-      const stopRouteIds = new Set(
-        (routeIdsParam ?? '')
-          .split(',')
-          .map((r) => r.trim())
-          .filter(Boolean)
-          .slice(0, 100),
-      );
+      const stopRouteIds = parseRouteIdsParam(routeIdsParam);
       filtered = filtered.filter(
         (a) => a.stopIds.includes(stopId) || isRouteWideAlert(a, stopRouteIds),
       );

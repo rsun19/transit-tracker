@@ -56,10 +56,16 @@ class WireReader {
 
   skip(wireType: number): void {
     if (wireType === WIRE_VARINT) this.varint();
-    else if (wireType === WIRE_64BIT) this.pos += 8;
+    else if (wireType === WIRE_64BIT) this.advance(8);
     else if (wireType === WIRE_LEN) this.sub();
-    else if (wireType === WIRE_32BIT) this.pos += 4;
+    else if (wireType === WIRE_32BIT) this.advance(4);
     else throw new Error(`unsupported wire type ${wireType}`);
+  }
+
+  /** Moves past a fixed-width field; throws if it runs past the end, like sub(). */
+  private advance(bytes: number): void {
+    if (this.pos + bytes > this.end) throw new Error('truncated field');
+    this.pos += bytes;
   }
 
   /** Iterates fields as [fieldNumber, wireType]; the caller must consume or skip each one. */

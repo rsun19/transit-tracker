@@ -62,6 +62,29 @@ describe('readAlertEffectDetails()', () => {
     expect(readAlertEffectDetails(new Uint8Array([0x12, 0xff, 0xff]))).toEqual(new Map());
   });
 
+  it.each([
+    ['64-bit', 1, 8],
+    ['32-bit', 5, 4],
+  ])('returns an empty map when a %s field is truncated', (_label, wireType, width) => {
+    // A complete entity, then a fixed-width field (number 9) cut one byte short.
+    const raw = feedBytes(alertEntity('A1', translated(['DELAY', 'en'])));
+    const truncated = new Uint8Array([
+      ...raw,
+      ...varint(9 * 8 + wireType),
+      ...new Array(width - 1).fill(0),
+    ]);
+    expect(readAlertEffectDetails(truncated)).toEqual(new Map());
+  });
+
+  it('returns an empty map when a fixed-width field overruns its sub-message', () => {
+    // Inside the alert, a 64-bit field (number 9) whose 8 bytes extend past
+    // the alert's declared length: the outer reader would hide this.
+    const alert = [...varintField(7, OTHER_EFFECT), ...varint(9 * 8 + 1), 0, 0, 0];
+    const entity = [...strField(1, 'A1'), ...lenField(5, alert)];
+    const raw = feedBytes(entity, alertEntity('A2', translated(['DELAY', 'en'])));
+    expect(readAlertEffectDetails(raw)).toEqual(new Map());
+  });
+
   it('feeds parseAlerts, which the bindings alone would leave without the detail', () => {
     const raw = feedBytes(alertEntity('A1', translated(['DELAY', 'en'])));
     const feed = transit_realtime.FeedMessage.decode(raw);
