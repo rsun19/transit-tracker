@@ -42,7 +42,7 @@ MBTA's website and its V3 API read the same prediction source (Concentrate) as `
 
 PRs 02 and 03 change the Redis format together, so merge and deploy them back-to-back (or as one PR). PRs 04, 12 and 01 can be done in parallel with anything.
 
-## Database efficiency (09, 15–20)
+## Database efficiency (09, 15–22)
 
 Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tables` / `pg_stat_user_indexes` and a full MBTA load on PostGIS 16. The database is about 3 GB, and `stop_times` is 2.7 GB of it. Most of the cost is overhead, not data:
 
@@ -56,15 +56,19 @@ Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tab
 | Arrivals at Park Street take about 150 ms: the per-request service-day CTE has no statistics, so the planner walks 33k trips                                                   | 18               |
 | `stop_times` indexes are 1.9 GB: an unused 506 MB uuid primary key, and an 889 MB index on a 16-byte `interval`                                                                | 19               |
 | 118k trips are 1,218 stop sequences on 10,360 timetables                                                                                                                       | 20 (exploratory) |
+| An uncached arrivals request makes up to 8 sequential round trips; 2–4 of them only work out which platforms a stop includes (a different way from nearby's)                   | 21               |
+| Route detail and route shape make 5 queries each, including a dead fallback that aggregates `stop_times`, to rebuild data that changes only per load                           | 22               |
 
-| #   | Plan                                                                                              | Type                   | Size |
-| --- | ------------------------------------------------------------------------------------------------- | ---------------------- | ---- |
-| 15  | [Skip unchanged static feeds; `gtfs_feed_loads` history table](15-skip-unchanged-static-feeds.md) | efficiency, new table  | M    |
-| 16  | [Resolve agency keys once; filter on `agency_id`](16-resolve-agency-ids-once.md)                  | query shape            | S    |
-| 17  | [One LineString per shape (`shape_lines`)](17-shape-linestrings.md)                               | efficiency, new table  | S–M  |
-| 18  | [Precomputed `service_dates`](18-service-dates-table.md)                                          | performance, new table | M    |
-| 19  | [Compact `stop_times`: natural key, integer times, stop-first index](19-compact-stop-times.md)    | storage, schema change | L    |
-| 20  | [Trips as patterns instead of `stop_times` rows](20-trip-pattern-storage.md)                      | exploratory            | XL   |
+| #   | Plan                                                                                              | Type                         | Size |
+| --- | ------------------------------------------------------------------------------------------------- | ---------------------------- | ---- |
+| 15  | [Skip unchanged static feeds; `gtfs_feed_loads` history table](15-skip-unchanged-static-feeds.md) | efficiency, new table        | M    |
+| 16  | [Resolve agency keys once; filter on `agency_id`](16-resolve-agency-ids-once.md)                  | query shape                  | S    |
+| 17  | [One LineString per shape (`shape_lines`)](17-shape-linestrings.md)                               | efficiency, new table        | S–M  |
+| 18  | [Precomputed `service_dates`](18-service-dates-table.md)                                          | performance, new table       | M    |
+| 19  | [Compact `stop_times`: natural key, integer times, stop-first index](19-compact-stop-times.md)    | storage, schema change       | L    |
+| 20  | [Trips as patterns instead of `stop_times` rows](20-trip-pattern-storage.md)                      | exploratory                  | XL   |
+| 21  | [Precomputed `stop_platforms`](21-stop-platforms-table.md)                                        | fewer round trips, new table | M    |
+| 22  | [Precomputed `route_documents`](22-precomputed-route-documents.md)                                | fewer queries, new table     | M    |
 
 **Order:**
 
@@ -72,9 +76,10 @@ Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tab
 - 15 and 16 next; they're independent of each other.
 - 17 and 18 can follow in any order.
 - 19 after 18, because 18's benchmark decides whether 19 also denormalizes `service_id`.
+- 21 and 22 any time after 08. They're independent of 15–20, though 22 is simpler after 16 and 17.
 - 20 only if the decision gate in its file is met.
 
-Plans 15, 17 and 18 add derived or bookkeeping tables, built in plan 07's staging step and swapped atomically with the rest.
+Plans 15, 17, 18, 21 and 22 add derived or bookkeeping tables, built in plan 07's staging step and swapped atomically with the rest.
 
 ## Security summary
 
