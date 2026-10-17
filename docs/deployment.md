@@ -138,6 +138,39 @@ No manual intervention needed. nginx stays up during rolling restarts because `d
 
 ---
 
+## Database
+
+Postgres is sized for the 3.8 GB / 3 vCPU / SSD host in `docker-compose.yml`: `shared_buffers=768MB`, `mem_limit: 1536m`, with WAL and checkpoint settings sized for the static load. Changing the `db` command restarts Postgres on the next deploy, which means a few seconds of failed DB requests.
+
+```sh
+DB='docker exec transit-tracker-db-1 sh -c'
+PSQL='psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+# Settings in effect
+$DB "$PSQL -c \"SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','max_wal_size')\""
+
+# Slowest queries by total time (pg_stat_statements)
+$DB "$PSQL -c \"SELECT calls, round(total_exec_time) AS total_ms, round(mean_exec_time::numeric, 1) AS mean_ms, left(query, 100) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20\""
+
+# Cache hit ratio (aim for ~0.99)
+$DB "$PSQL -c \"SELECT round(sum(heap_blks_hit) / nullif(sum(heap_blks_hit + heap_blks_read), 0), 3) FROM pg_statio_user_tables\""
+
+# Table and index sizes
+$DB "$PSQL -c \"SELECT relname, pg_size_pretty(pg_relation_size(relid)) AS heap, pg_size_pretty(pg_indexes_size(relid)) AS indexes FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 5\""
+```
+
+### Reclaiming table bloat (manual, one-off)
+
+Every static load deletes and re-inserts the whole schedule, so `stop_times` grows to about twice its live size. To shrink it, run this at a quiet time (around 03:00 ET, not near the 04:00 load):
+
+```sh
+docker exec transit-tracker-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "VACUUM (FULL, ANALYZE) stop_times, shapes, trips"'
+```
+
+`VACUUM FULL` locks each table while it rewrites it, so arrivals and trip pages fail for the minute or two it runs. It isn't automated for that reason. Once loads only run when the feed changes (plan 15), bloat stays low.
+
+---
+
 ## TLS Renewal
 
 The `certbot` container runs a renewal loop every 12 hours. Certificates auto-renew when they are within 30 days of expiry. Renewal uses the **webroot** method (nginx serves `/.well-known/acme-challenge/` from the shared `certbot_webroot` volume). The initial bootstrap uses `--standalone` because nginx can't start without a cert, but standalone can't be used for renewals since nginx holds port 80. The renew command passes `--webroot` explicitly to override the saved authenticator.

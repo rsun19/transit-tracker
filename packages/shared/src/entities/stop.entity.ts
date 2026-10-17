@@ -18,7 +18,6 @@ import { Agency } from './agency.entity';
 @Index('idx_stops_agency_parent_station', { synchronize: false })
 @Index('idx_stops_stop_name_trgm', { synchronize: false })
 @Index('idx_stops_stop_code_trgm', { synchronize: false })
-@Index(['agencyId', 'stopCode'])
 export class Stop {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
