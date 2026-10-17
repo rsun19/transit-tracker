@@ -451,12 +451,17 @@ jobs:
               exit 1
             fi
 
-            # The ingestion worker owns the schema (TypeORM synchronize) and
-            # writes its liveness file only after the sync, so start it first:
-            # API services that query a newly added table then never see it
-            # missing. Non-fatal; the rest of the stack still comes up.
-            docker compose up -d --wait --wait-timeout 180 ingestion \
-              || echo "WARNING: ingestion did not report healthy — check its logs"
+            # Gate: start the ingestion worker first. It depends on the one-shot
+            # `migrate` service, so this applies pending schema migrations, then
+            # waits for the worker to be healthy. If either fails, stop here:
+            # updating the rest would leave the services that don't depend on
+            # `migrate` on the new release and the database ones on the old.
+            if ! docker compose up -d --wait --wait-timeout 180 ingestion; then
+              echo "ERROR: migration or ingestion gate failed; aborting deploy"
+              docker compose ps -a migrate ingestion
+              docker compose logs --tail 50 migrate
+              exit 1
+            fi
 
             docker compose up -d --remove-orphans
 

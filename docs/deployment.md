@@ -124,11 +124,11 @@ Push to `main` → CI runs all checks → deploy job:
 
 1. Updates `IMAGE_TAG` in server `.env` to the new git SHA
 2. Runs `docker compose pull` to fetch new images
-3. Runs `docker compose up -d --wait ingestion`: the one-shot `migrate` service applies pending schema migrations (and exits), then the worker starts
+3. Runs `docker compose up -d --wait ingestion`: the one-shot `migrate` service applies pending schema migrations (and exits), then the worker starts. This step must succeed
 4. Runs `docker compose up -d --remove-orphans`
 5. Prunes old images
 
-`routes`, `stops` and `ingestion` start only after `migrate` exits successfully. If a migration fails, they keep running their previous containers; `docker compose logs migrate` shows why.
+`routes`, `stops` and `ingestion` start only after `migrate` exits successfully. If a migration fails or the worker doesn't become healthy, the deploy stops at step 3 and nothing else is updated, so production stays on the previous release; the job log shows the `migrate` output.
 
 ### Schema migrations
 
