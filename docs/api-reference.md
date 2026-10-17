@@ -261,6 +261,8 @@ Upcoming departures for a stop, merged with GTFS-RT predictions. Trips scheduled
   "stopId": "place-alfcl",
   "stopName": "Alewife",
   "agencyKey": "mbta",
+  "timezone": "America/New_York",
+  "feedTimestamp": 1792065420,
   "data": [
     {
       "tripId": "63885441",
@@ -282,13 +284,15 @@ Upcoming departures for a stop, merged with GTFS-RT predictions. Trips scheduled
 ```
 
 - Times are the **arrival** time, else the departure (a trip's first stop), as MBTA shows them. `departureTime` is when the vehicle leaves the stop; between the two it is boarding. A train stays listed until its predicted departure, so one at the platform can show an arrival time just in the past.
+- `timezone` is the agency's IANA timezone. Clients show times in it, as station clocks and mbta.com do, whatever the device's timezone.
+- `feedTimestamp` is the header timestamp (epoch seconds) of the GTFS-RT feed the predictions came from, or `null` when no realtime data was available. The stop page shows its age and warns past 2 minutes.
 - `realtimeArrival` is the effective time (`predictedTime` if present, else `scheduledTime`), kept for compatibility.
 - `realtimeDelaySeconds` is `predictedTime − scheduledTime`; `null` without a prediction.
 - `hasRealtime` is true only when a prediction exists.
 - `status`: `scheduled` (no prediction), `on_time` / `late` / `early` (±60 s threshold, `ARRIVAL_ON_TIME_THRESHOLD_S`), or `added` (extra service with no scheduled trip; `scheduledTime` and `realtimeDelaySeconds` are `null`). `canceled` and `skipped` exist in the type but those rows are currently filtered out.
 
 **Errors**: `404` if stop not found for the given agency  
-**Cache**: 5 s — key `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}`
+**Cache**: 5 s — key `cache:arrivals:v7:{agencyKey}:{stopId}:{limit}:{after}`
 
 ---
 

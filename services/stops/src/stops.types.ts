@@ -58,6 +58,17 @@ export interface ArrivalResponse {
   uncertaintySeconds: number | null;
 }
 
+export interface ArrivalsResponse {
+  data: ArrivalResponse[];
+  stopId: string;
+  agencyKey: string;
+  stopName: string;
+  /** Agency IANA timezone; clients show times in it, as the agency does. */
+  timezone: string;
+  /** Header timestamp (epoch s) of the realtime feed the predictions came from; null without realtime data. */
+  feedTimestamp: number | null;
+}
+
 export interface AddedTripEntry {
   trip: {
     tripId: string;

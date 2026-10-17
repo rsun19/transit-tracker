@@ -18,11 +18,11 @@ const BASE: Arrival = {
   directionId: 1,
 };
 
-function wrap(arr: Arrival) {
+function wrap(arr: Arrival, props: { timeZone?: string; now?: number } = {}) {
   return render(
     <Table>
       <TableBody>
-        <ArrivalRow arrival={arr} />
+        <ArrivalRow arrival={arr} {...props} />
       </TableBody>
     </Table>,
   );
@@ -92,12 +92,57 @@ describe('late realtime arrival', () => {
 });
 
 describe('time formatting', () => {
-  const fmt = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
   it('truncates to the minute like mbta.com (8:09:51 shows as 8:09)', () => {
-    const at = new Date(2026, 9, 15, 8, 9, 51);
-    wrap({ ...BASE, realtimeArrival: at.toISOString() });
-    expect(screen.getByText(fmt(new Date(2026, 9, 15, 8, 9)))).toBeInTheDocument();
+    // 12:09:51Z is 8:09:51 AM in Boston (EDT).
+    wrap({ ...BASE, realtimeArrival: '2026-10-15T12:09:51.000Z' });
+    expect(screen.getByText('8:09 AM')).toBeInTheDocument();
+  });
+
+  it('shows the agency timezone, not the device timezone', () => {
+    const tz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      wrap({ ...BASE, realtimeArrival: '2026-10-15T12:42:00.000Z' });
+      expect(screen.getByText('8:42 AM')).toBeInTheDocument();
+      expect(screen.queryByText('5:42 AM')).not.toBeInTheDocument();
+    } finally {
+      process.env.TZ = tz;
+    }
+  });
+
+  it('uses the timezone it is given', () => {
+    wrap({ ...BASE, realtimeArrival: '2026-10-15T12:42:00.000Z' }, { timeZone: 'America/Chicago' });
+    expect(screen.getByText('7:42 AM')).toBeInTheDocument();
+  });
+
+  it('falls back to Boston time for an unknown timezone', () => {
+    wrap({ ...BASE, realtimeArrival: '2026-10-15T12:42:00.000Z' }, { timeZone: 'Not/AZone' });
+    expect(screen.getByText('8:42 AM')).toBeInTheDocument();
+  });
+});
+
+describe('server status', () => {
+  it('uses status over the delay', () => {
+    wrap({ ...BASE, hasRealtime: true, realtimeDelaySeconds: 0, status: 'late' });
+    expect(screen.queryByText('On Time')).not.toBeInTheDocument();
+  });
+
+  it('shows nothing extra for added trips', () => {
+    wrap({ ...BASE, hasRealtime: true, realtimeDelaySeconds: null, status: 'added' });
+    expect(screen.queryByText('On Time')).not.toBeInTheDocument();
+    expect(screen.queryByText('(scheduled)')).not.toBeInTheDocument();
+  });
+
+  it('labels a canceled trip and strikes through its time', () => {
+    wrap({
+      ...BASE,
+      hasRealtime: false,
+      status: 'canceled',
+      realtimeArrival: '2026-10-15T12:42:00.000Z',
+    });
+    expect(screen.getByText('Canceled')).toBeInTheDocument();
+    expect(screen.getByText('8:42 AM')).toHaveStyle('text-decoration: line-through');
+    expect(screen.queryByText('(scheduled)')).not.toBeInTheDocument();
   });
 });
 

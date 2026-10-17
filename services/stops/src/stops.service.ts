@@ -34,7 +34,13 @@ import {
   type MergedArrival,
   type ScheduledRow,
 } from './merge-realtime';
-import { StopRouteRef, StopResponse, ArrivalResponse, AddedTripEntry } from './stops.types';
+import {
+  StopRouteRef,
+  StopResponse,
+  ArrivalResponse,
+  ArrivalsResponse,
+  AddedTripEntry,
+} from './stops.types';
 
 // ─── Shared SQL for scheduled stop_times ─────────────────────────────────────
 // Placeholders are passed in because the two arrival queries number their
@@ -250,17 +256,11 @@ export class StopsService {
     agencyKey: string,
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
-  ): Promise<{ data: ArrivalResponse[]; stopId: string; agencyKey: string; stopName: string }> {
+  ): Promise<ArrivalsResponse> {
     const cappedLimit = Math.min(limit, MAX_SEARCH_LIMIT);
-    const cacheKey = `cache:arrivals:v6:${agencyKey}:${stopId}:${cappedLimit}:${after ?? 'now'}`;
+    const cacheKey = `cache:arrivals:v7:${agencyKey}:${stopId}:${cappedLimit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
-    if (cached)
-      return JSON.parse(cached) as {
-        data: ArrivalResponse[];
-        stopId: string;
-        agencyKey: string;
-        stopName: string;
-      };
+    if (cached) return JSON.parse(cached) as ArrivalsResponse;
 
     const [agRow] = await this.dataSource.query<Array<{ agencyId: string; timezone: string }>>(
       `SELECT "agencyId", timezone FROM agencies WHERE agency_key = $1 LIMIT 1`,
@@ -395,7 +395,17 @@ export class StopsService {
 
     const data = selectUpcoming(merged, cutoffS, cappedLimit).map(toArrivalResponse);
 
-    const result = { data, stopId, agencyKey, stopName };
+    // Every entry in a hash comes from the same feed poll; the newest one
+    // tells the client how fresh the predictions are.
+    const feedTimestamps = [...realtimeByTrip.values(), ...addedTrips].map((t) => t.feedTimestamp);
+    const result: ArrivalsResponse = {
+      data,
+      stopId,
+      agencyKey,
+      stopName,
+      timezone,
+      feedTimestamp: feedTimestamps.length > 0 ? Math.max(...feedTimestamps) : null,
+    };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ARRIVALS_TTL_S);
     return result;
   }

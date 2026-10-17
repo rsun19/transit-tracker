@@ -89,6 +89,31 @@ export interface Arrival {
   directionId: number | null;
   /** When the vehicle leaves the stop (ISO). Absent from older API responses. */
   departureTime?: string;
+  /** Server-computed status; absent from older API responses. */
+  status?: ArrivalStatus;
+  scheduledTime?: string | null;
+  predictedTime?: string | null;
+  uncertaintySeconds?: number | null;
+}
+
+export type ArrivalStatus =
+  | 'scheduled'
+  | 'on_time'
+  | 'late'
+  | 'early'
+  | 'canceled'
+  | 'skipped'
+  | 'added';
+
+export interface StopArrivalsResponse {
+  data: Arrival[];
+  stopId: string;
+  agencyKey: string;
+  stopName: string;
+  /** Agency IANA timezone; absent from older API responses. */
+  timezone?: string;
+  /** Realtime feed header timestamp (epoch s); null without realtime data. */
+  feedTimestamp?: number | null;
 }
 
 export interface Trip {
@@ -183,13 +208,11 @@ export function fetchStopArrivals(
   stopId: string,
   agencyKey: string,
   params?: { limit?: number; after?: string },
-): Promise<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }> {
+): Promise<StopArrivalsResponse> {
   const qs = new URLSearchParams({ agencyKey });
   if (params?.limit !== undefined) qs.set('limit', String(params.limit));
   if (params?.after) qs.set('after', params.after);
-  return apiFetch<{ data: Arrival[]; stopId: string; agencyKey: string; stopName: string }>(
-    `/stops/${encodeURIComponent(stopId)}/arrivals?${qs}`,
-  );
+  return apiFetch<StopArrivalsResponse>(`/stops/${encodeURIComponent(stopId)}/arrivals?${qs}`);
 }
 
 export function fetchTrip(tripId: string, agencyKey: string): Promise<Trip> {

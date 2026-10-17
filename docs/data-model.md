@@ -251,7 +251,7 @@ Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpda
 | -------------------------------------------------------- | ----- | ----------------------------------------------------- |
 | `cache:routes:{agencyKey}`                               | 300 s | Expires naturally; refreshed after GTFS static ingest |
 | `cache:route:v2:{agencyKey}:{routeId}`                   | 300 s | —                                                     |
-| `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
+| `cache:arrivals:v7:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
 | `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`          | 45 s  | —                                                     |
 | `cache:trip:{agencyKey}:{tripId}:{serviceDate\|current}` | 60 s  | —                                                     |
 

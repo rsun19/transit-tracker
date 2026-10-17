@@ -12,7 +12,15 @@ import {
   TableBody,
 } from '@mui/material';
 
-const ArrivalTable = ({ title, arrivals }: { title: string; arrivals: Arrival[] }) => {
+type ArrivalTableProps = {
+  title: string;
+  arrivals: Arrival[];
+  /** Agency timezone the times are shown in. */
+  timeZone?: string;
+  now?: number;
+};
+
+const ArrivalTable = ({ title, arrivals, timeZone, now }: ArrivalTableProps) => {
   return (
     <Box>
       <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
@@ -33,6 +41,8 @@ const ArrivalTable = ({ title, arrivals }: { title: string; arrivals: Arrival[] 
               <ArrivalRow
                 key={`${arr.routeId}-${arr.realtimeArrival ?? arr.tripId}-${i}`}
                 arrival={arr}
+                timeZone={timeZone}
+                now={now}
               />
             ))}
           </TableBody>
