@@ -33,7 +33,7 @@ The culprits:
    - It holds `agencyKey → { agencyId, timezone, dataVersion }`.
    - It loads all rows at startup (`SELECT "agencyId", agency_key, timezone, data_version FROM agencies`) and refreshes every 60 s, and immediately on a miss, so a newly ingested agency appears.
    - `resolve(key)` returns the entry or `null`; callers turn `null` into their existing 404.
-   - `dataVersion` comes along for free for plan 09's cache keys.
+   - `dataVersion` comes along for free for plan 10's cache keys.
 2. **Rewrite every site above to take `agencyId`:**
    - `getShape`: `WHERE agency_id = $1 AND shape_id = $2 ORDER BY pt_sequence`, as raw SQL returning `ST_X`/`ST_Y`. That also drops the per-point WKB/regex parsing in `routes.service.ts:228-246`. Plan 17 replaces this query entirely, but this fix stands alone.
    - Routes `findAll` / `findOne`: `r.agency_id = :agencyId`.

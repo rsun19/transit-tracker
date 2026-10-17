@@ -12,8 +12,8 @@
    - `stop_times` has seen 535M inserts, about 170 full reloads (prod, 2026-10-17). Most of them reloaded an identical zip.
 2. **The churn costs time and space:**
    - each production load takes about 290 s;
-   - it causes the 2.2× bloat in plan 14;
-   - every API cache keyed on `data_version` (plan 09) is invalidated even when nothing changed.
+   - it causes the 2.2× bloat in plan 09;
+   - every API cache keyed on `data_version` (plan 10) is invalidated even when nothing changed.
 3. **There's no record of which feed is loaded.**
    - `agencies.last_ingested_at` and `data_version` say _when_ the last load ran, not _what_ it loaded.
    - When a load is refused (plan 07's row-count guard), the only trace is a log line.
@@ -46,7 +46,7 @@
 4. **Force reload:** `GTFS_FORCE_RELOAD=true` ignores 2–3 once. Document it for "the DB looks wrong; reload it".
 5. **Startup loads become cheap.** With `GTFS_INGEST_ON_STARTUP=true`, a deploy now costs one 304. The plan 07 swap only runs when MBTA publishes something new, typically a few times a week.
 6. **Retention:** keep the last 200 rows per agency; delete older ones after each load.
-7. **Expose it:** `GET /api/v1/agencies` adds `feedVersion`, `feedValidUntil` (`feed_end_date`) and `lastCheckedAt`. This covers plan 12's `lastIngestedAt`.
+7. **Expose it:** `GET /api/v1/agencies` adds `feedVersion`, `feedValidUntil` (`feed_end_date`) and `lastCheckedAt`. This covers plan 13's `lastIngestedAt`.
 8. **Warn on expiry:** log a warning when `feed_end_date` is less than 7 days away. A feed that expires silently empties the arrivals.
 
 ## Tests

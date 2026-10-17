@@ -13,6 +13,7 @@
    - qs-style array params (`?q[x]=ab`) bypass `q.length < 2` (`:54`).
 
    There's no `ValidationPipe` anywhere.
+
 2. **LIKE wildcards aren't escaped.** `stops.service.ts:47` and `routes.service.ts:73`: `q=%%` passes the length check and forces a full-scan `COUNT`.
 3. **Nearby cache key omits `limit`** (`stops.service.ts:509`). A `limit=1` request caches a one-stop result for that ~110 m cell for 45 s, and everyone nearby gets it. Cache hits also return the first requester's exact `searchCentre` and distances.
 4. **Unbounded, long-lived cache keys from user input.** Keys like `cache:stops:routes:{agencyKey}:{stopId}` are cached for 86400 s even when the result is empty (`stops.service.ts:463,489`). Trips and routes use 3600 s (`routes.service.ts:63,104`, `trips.service.ts:34`). Through the port-80 bypass (PR 01) an attacker can mint millions of 24 h keys.
@@ -31,6 +32,7 @@
    - `stopId`/`tripId`/`routeId` match `/^[\w\-.:\s]{1,100}$/`.
 
    Invalid input returns 400 with a generic message.
+
 2. Escape `%`, `_` and `\` in LIKE patterns and add `ESCAPE '\'`.
 3. Build cache keys from the **validated, normalized** values. Include `limit` in the nearby key, and round the query point to the cache cell so cached responses are consistent.
 4. Put the agency's `data_version` (PR 07) in the static-data cache keys, so a reload invalidates them automatically. Cache "not found" or empty results for ≤60 s, not 24 h.

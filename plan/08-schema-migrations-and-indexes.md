@@ -2,7 +2,7 @@
 
 **Type:** reliability and performance
 **Touches:** `services/ingestion/src/worker.module.ts`, new `packages/shared/src/migrations/`, `gtfs-static.service.ts` (remove ad-hoc DDL), `stops.service.ts` queries, `docker/init-db.sql`
-**Depends on:** PR 07 (removes the remaining ingestion-time DDL; its staging tables are session TEMP tables, so they need no migration). PR 10 builds its DB roles on the `migrate` service introduced here
+**Depends on:** PR 07 (removes the remaining ingestion-time DDL; its staging tables are session TEMP tables, so they need no migration). PR 11 builds its DB roles on the `migrate` service introduced here
 
 ## Problem
 
@@ -17,12 +17,12 @@
 
 1. Add a TypeORM `migrations` folder. Run migrations from a one-shot `migrate` compose service (`command: npm run migration:run`, using the schema-owner credentials). The app services wait for it with `depends_on: { migrate: { condition: service_completed_successfully } }`. That way the long-running worker never needs DDL rights (PR 10). Set `synchronize: false` everywhere.
 2. Split the migrations:
-   - **`0001-baseline`**: *only* the schema that already exists in prod (generate it from a prod-like DB). This is the one migration that may be marked as applied on existing databases.
+   - **`0001-baseline`**: _only_ the schema that already exists in prod (generate it from a prod-like DB). This is the one migration that may be marked as applied on existing databases.
    - **`0002-indexes-and-tables`**: everything new, which must actually run on every environment:
    - `CREATE EXTENSION IF NOT EXISTS pg_trgm`, then the trigram indexes (instead of ad-hoc DDL);
    - the `route_stops` and `route_branches` tables, with an index on `(stop_id, agency_id)`;
    - `CREATE INDEX ON stops (agency_id, parent_station_id)`;
-   - `CREATE INDEX ON stops USING gist ((location::geography))`, *or* change the column type to `geography(Point,4326)`;
+   - `CREATE INDEX ON stops USING gist ((location::geography))`, _or_ change the column type to `geography(Point,4326)`;
    - the `service_calendar_dates` table from PR 04, if PR 04 didn't already create it with a migration. PR 07's staging tables are session TEMP tables, so they need no migration.
 3. Delete the DDL from `gtfs-static.service.ts`; ingestion only does DML.
 4. Rewrite the nearby query to compare against the indexed expression exactly. Add `agency_id` to the `route_stops` filters.

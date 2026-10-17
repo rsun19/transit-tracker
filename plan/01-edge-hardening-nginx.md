@@ -14,7 +14,7 @@
 ## Changes
 
 1. **Split internal and public traffic.**
-   - Add `server { listen 8080; ... }`, which is *not* published in compose, with the `/api/v1/*` locations for SSR. Point the frontend's `BACKEND_URL` at `http://nginx:8080`.
+   - Add `server { listen 8080; ... }`, which is _not_ published in compose, with the `/api/v1/*` locations for SSR. Point the frontend's `BACKEND_URL` at `http://nginx:8080`.
    - Reduce the public `listen 80` server to `/.well-known/acme-challenge/` plus `return 301 https://…`.
    - Add a catch-all `server { listen 80 default_server; listen 443 ssl default_server; return 444; }` (443 needs a cert, or use `ssl_reject_handshake on;` on nginx ≥1.19.4). This drops requests whose Host isn't ours.
 2. **Rate-limit pages:** add `limit_req_zone $binary_remote_addr zone=pages:10m rate=5r/s;` and `limit_req zone=pages burst=20 nodelay;` on `location /`. Exempt `/_next/static/`, which can also get long `expires` caching.
@@ -35,7 +35,7 @@
    - `docker-compose.yml` nginx service: add `- ./nginx/snippets:/etc/nginx/snippets:ro` next to the existing `./nginx.conf:/etc/nginx/nginx.conf:ro` (`docker-compose.yml:209`);
    - `docker-compose.dev.yml`, if `nginx.dev.conf` uses the snippets;
    - the CI `nginx -t` command below;
-   - the deploy `scp` source list (PR 11), so the snippets reach the server.
+   - the deploy `scp` source list (PR 12), so the snippets reach the server.
 
 ## Verify
 

@@ -33,22 +33,23 @@ MBTA's website and its V3 API read the same prediction source (Concentrate) as `
 | 06  | [Shared infra module plus Redis and worker resilience](06-shared-infra-and-resilience.md)                | reliability             | M                    |
 | 07  | [Atomic GTFS static reload](07-atomic-static-ingestion.md)                                               | data integrity          | M–L                  |
 | 08  | [Migrations instead of `synchronize: true`; indexes](08-schema-migrations-and-indexes.md)                | reliability / perf      | M                    |
-| 09  | [API validation and cache-key correctness](09-api-validation-and-cache-keys.md)                          | security (DoS)          | M                    |
-| 10  | [Dependency, runtime, and container upgrades](10-dependency-and-container-upgrades.md)                   | security                | L (split into a/b/c) |
-| 11  | [CI and deploy workflow hardening](11-ci-hardening.md)                                                   | security (supply chain) | S                    |
-| 12  | [Functional fixes (vehicle payload, `lastIngestedAt`) and dead code](12-functional-fixes-and-cleanup.md) | bugs / cleanup          | S                    |
-| 13  | [Test coverage where the risk is](13-test-coverage.md)                                                   | tests                   | M                    |
+| 09  | [Size Postgres for the box; reclaim bloat; `pg_stat_statements`](09-postgres-memory-and-bloat.md)        | performance (config)    | S                    |
+| 10  | [API validation and cache-key correctness](10-api-validation-and-cache-keys.md)                          | security (DoS)          | M                    |
+| 11  | [Dependency, runtime, and container upgrades](11-dependency-and-container-upgrades.md)                   | security                | L (split into a/b/c) |
+| 12  | [CI and deploy workflow hardening](12-ci-hardening.md)                                                   | security (supply chain) | S                    |
+| 13  | [Functional fixes (vehicle payload, `lastIngestedAt`) and dead code](13-functional-fixes-and-cleanup.md) | bugs / cleanup          | S                    |
+| 14  | [Test coverage where the risk is](14-test-coverage.md)                                                   | tests                   | M                    |
 
-PRs 02 and 03 change the Redis format together, so merge and deploy them back-to-back (or as one PR). PRs 04, 11 and 01 can be done in parallel with anything.
+PRs 02 and 03 change the Redis format together, so merge and deploy them back-to-back (or as one PR). PRs 04, 12 and 01 can be done in parallel with anything.
 
-## Database efficiency (14–20)
+## Database efficiency (09, 15–20)
 
 Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tables` / `pg_stat_user_indexes` and a full MBTA load on PostGIS 16. The database is about 3 GB, and `stop_times` is 2.7 GB of it. Most of the cost is overhead, not data:
 
 | Finding (prod)                                                                                                                                                                 | Plan             |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
-| `shared_buffers` is 32 MB on a 3.8 GB box; `max_wal_size` is 64 MB, so a load checkpoints constantly (the production swap takes 257 s; locally, 25 s)                          | 14               |
-| `stop_times` heap is 268 B per live row for 124 B rows (2.2× bloat from about 170 full reloads); `pg_stat_statements` isn't installed                                          | 14               |
+| `shared_buffers` is 32 MB on a 3.8 GB box; `max_wal_size` is 64 MB, so a load checkpoints constantly (the production swap takes 257 s; locally, 25 s)                          | 09               |
+| `stop_times` heap is 268 B per live row for 124 B rows (2.2× bloat from about 170 full reloads); `pg_stat_statements` isn't installed                                          | 09               |
 | Every deploy and the nightly cron rewrite 3.1M `stop_times` rows even when MBTA hasn't published; MBTA answers `If-None-Match` with 304                                        | 15               |
 | `agencies` (1 row) has had **698M sequential scans**: queries filter on `agency_key` through a join. The shapes index has **0 scans**: `getShape` never filters on `agency_id` | 16               |
 | `shapes` is 395k point rows (204 MB), read only to rebuild about 900 LineStrings                                                                                               | 17               |
@@ -58,7 +59,6 @@ Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tab
 
 | #   | Plan                                                                                              | Type                   | Size |
 | --- | ------------------------------------------------------------------------------------------------- | ---------------------- | ---- |
-| 14  | [Size Postgres for the box; reclaim bloat; `pg_stat_statements`](14-postgres-memory-and-bloat.md) | config                 | S    |
 | 15  | [Skip unchanged static feeds; `gtfs_feed_loads` history table](15-skip-unchanged-static-feeds.md) | efficiency, new table  | M    |
 | 16  | [Resolve agency keys once; filter on `agency_id`](16-resolve-agency-ids-once.md)                  | query shape            | S    |
 | 17  | [One LineString per shape (`shape_lines`)](17-shape-linestrings.md)                               | efficiency, new table  | S–M  |
@@ -68,7 +68,7 @@ Added 2026-10-17 after plans 01–08 landed, from production's `pg_stat_user_tab
 
 **Order:**
 
-- 14 first: it's cheap, and its `pg_stat_statements` baseline measures the rest.
+- 09 comes first, in the main sequence above: it's cheap, and its `pg_stat_statements` baseline measures the rest.
 - 15 and 16 next; they're independent of each other.
 - 17 and 18 can follow in any order.
 - 19 after 18, because 18's benchmark decides whether 19 also denormalizes `service_id`.
@@ -83,11 +83,11 @@ Plans 15, 17 and 18 add derived or bookkeeping tables, built in plan 07's stagin
 The main risks, in priority order:
 
 1. **Public port 80 proxies the whole API with no rate limit** (01).
-2. **Out-of-support Next 14 and Node 20**, with known DoS advisories (10).
+2. **Out-of-support Next 14 and Node 20**, with known DoS advisories (11).
 3. **Redis clients stop reconnecting for good after about 1.5 s** (06).
-4. **Unbounded, user-keyed cache entries and no Redis `maxmemory`** (09, 06).
-5. **Every service connects as the Postgres superuser and gets every secret** (10).
-6. **CI deploy actions are tag-pinned and do no SSH host-key check** (11).
+4. **Unbounded, user-keyed cache entries and no Redis `maxmemory`** (10, 06).
+5. **Every service connects as the Postgres superuser and gets every secret** (11).
+6. **CI deploy actions are tag-pinned and do no SSH host-key check** (12).
 7. **Non-atomic static reload** that can leave duplicated `stop_times` (07).
 
 ## Re-running the feed analysis
