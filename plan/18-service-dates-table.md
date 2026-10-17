@@ -66,7 +66,7 @@
   - a `calendar_dates`-only service (exception 1) is present;
   - a weekday service is present on weekdays only, within its date range.
 - **Equivalence:** for every date in the fixture's range, `SELECT … FROM service_dates` equals the old `activeServicesCte` result.
-- **Golden arrivals:** plan 13's golden test returns identical arrivals before and after.
+- **Golden arrivals:** plan 14's golden test returns identical arrivals before and after.
 
 ## Verify
 

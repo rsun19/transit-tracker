@@ -2,7 +2,7 @@
 
 **Type:** efficiency (storage and I/O), schema change
 **Touches:** new migration, `packages/shared/src/entities/stop-time.entity.ts`, `packages/shared/src/service-day.ts` (`gtfsTimestampSql`), `services/ingestion/src/static/gtfs-rows.ts` (`STOP_TIMES`), `gtfs-static.service.ts`, the `stop_times` queries in `services/stops/src/stops.service.ts`, `services/routes/src/{routes,trips}.service.ts`
-**Depends on:** plans 07, 08, 14 (for measuring), 18 (so the arrivals benchmark is meaningful)
+**Depends on:** plans 07, 08, 09 (for measuring), 18 (so the arrivals benchmark is meaningful)
 
 ## Problem
 
@@ -10,7 +10,7 @@
 
 |                                                                          | size       | notes                                                                              |
 | ------------------------------------------------------------------------ | ---------- | ---------------------------------------------------------------------------------- |
-| heap                                                                     | 797 MB     | 3,114,168 rows. Average row 124 B, but 268 B of heap per live row (bloat, plan 14) |
+| heap                                                                     | 797 MB     | 3,114,168 rows. Average row 124 B, but 268 B of heap per live row (bloat, plan 09) |
 | `PK_1a2a89e5…` (uuid `id`)                                               | **506 MB** | never used to find a row; its only scans are uniqueness checks on insert           |
 | `idx_stop_times_agency_stop_dept` (`agency_id, stop_id, departure_time`) | **889 MB** | 28k scans; `departure_time` is a 16-byte `interval`                                |
 | `idx_stop_times_agency_trip_seq` (`agency_id, trip_id, stop_sequence`)   | 508 MB     | 2.4M scans; this is the table's natural key                                        |
@@ -38,11 +38,11 @@ Per row:
 4. **Rolling out the table rewrite.** The migration builds the new layout alongside the old:
    - `CREATE TABLE stop_times_v2 (…)`, then `INSERT … SELECT` converting the intervals with `extract(epoch from …)::int`, then build the indexes.
    - In one transaction, `DROP TABLE stop_times` and `ALTER TABLE stop_times_v2 RENAME TO stop_times`.
-   - On production that's about 3M rows; expect a few minutes at plan 14's settings. Readers keep the old table until the rename commits.
+   - On production that's about 3M rows; expect a few minutes at plan 09's settings. Readers keep the old table until the rename commits.
    - The `migrate` service runs before the new services start (plan 08), so old code never sees the new layout.
    - Take a `pg_dump` first, as for plan 08.
 
-   The rename is done by the migration's schema-owner role, so plan 10's least-privilege ingest role isn't affected. That's why this is a migration and not part of the load.
+   The rename is done by the migration's schema-owner role, so plan 11's least-privilege ingest role isn't affected. That's why this is a migration and not part of the load.
 
 5. **Shapes:** if plan 17 hasn't landed yet, drop `shapes.id` the same way; its uuid primary key is 59 MB.
 
@@ -57,12 +57,12 @@ Per row:
 | stop index, with its `INCLUDE` columns            |                      | about 200 MB                           |
 | **total**                                         |                      | **about 0.6 GB, against 2.7 GB today** |
 
-Each reload writes proportionally less (rarely, after plan 15), and the working set fits in plan 14's `shared_buffers`.
+Each reload writes proportionally less (rarely, after plan 15), and the working set fits in plan 09's `shared_buffers`.
 
 ## Tests
 
 - **Migration integration** (plan 08's harness): adopt the old layout with rows, migrate, and check every row converted. Spot-check `25:30:00` → `91800` and NULL times staying NULL. The entity-drift test passes.
-- **Golden arrivals** (plan 13) and the plan 07 fixture load are identical before and after.
+- **Golden arrivals** (plan 14) and the plan 07 fixture load are identical before and after.
 - `gtfsTimestampSql` unit tests are updated for seconds, including the DST cases from plan 04.
 
 ## Verify

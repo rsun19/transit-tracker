@@ -2,7 +2,6 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -12,7 +11,6 @@ import { Agency } from './agency.entity';
 
 @Entity('routes')
 @Unique(['agencyId', 'routeId'])
-@Index(['agencyId', 'routeType'])
 export class Route {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

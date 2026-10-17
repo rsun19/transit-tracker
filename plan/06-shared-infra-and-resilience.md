@@ -2,7 +2,7 @@
 
 **Type:** reliability and refactor
 **Touches:** `services/*/src/cache/*`, `services/*/src/agencies/*`, `services/*/src/main.ts`, `services/*/src/health.controller.ts`, `services/ingestion/src/{worker.ts,ingestion.scheduler.ts}`, `packages/shared/`, `docker-compose.yml`
-**Depends on:** nothing. Land it before PR 07–09 so they only edit one copy of the cache code.
+**Depends on:** nothing. Land it before PRs 07, 08 and 10 so they only edit one copy of the cache code.
 
 ## Problem
 
@@ -12,8 +12,9 @@
    - ingestion can't write.
 
    Health checks only report uptime, so Docker never restarts anything.
+
 2. **The worker liveness check is fake.** `worker.ts:58-59` touches `/tmp/worker-alive` once at boot, and the compose healthcheck (`docker-compose.yml:177`) only checks that the file exists. A hung poll loop (see the fetch-timeout item in PR 02) or a hung static download (`gtfs-static.service.ts:326`, no timeout) looks healthy forever.
-3. **Redis has no memory limit.** `docker-compose.yml:29` sets no `maxmemory` and no eviction policy. User-controlled cache keys (PR 09) can grow it until the OOM killer takes it down, which then triggers problem 1.
+3. **Redis has no memory limit.** `docker-compose.yml:29` sets no `maxmemory` and no eviction policy. User-controlled cache keys (PR 10) can grow it until the OOM killer takes it down, which then triggers problem 1.
 4. **The scheduler ignores config.** `ingestion.scheduler.ts:61` uses the constant `REALTIME_POLL_INTERVAL_MS` instead of the validated `GTFS_REALTIME_POLL_INTERVAL_MS`. `:34` reads `GTFS_STATIC_CRON` from `process.env` at import time.
 5. **Copy-pasted infrastructure:**
    - `cache.module.ts` and `cache.service.ts` are byte-identical in 5 services;

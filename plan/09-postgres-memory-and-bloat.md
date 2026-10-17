@@ -2,7 +2,7 @@
 
 **Type:** performance (configuration)
 **Touches:** `docker-compose.yml` (`db` command, `mem_limit`), a new migration (index hygiene), `docs/deployment.md`
-**Depends on:** nothing. Do it first: it's the cheapest win, and `pg_stat_statements` gives the later plans a baseline.
+**Depends on:** nothing. It's the cheapest win, and its `pg_stat_statements` baseline measures the later database plans (15–19).
 
 ## Problem
 

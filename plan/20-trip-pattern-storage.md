@@ -1,6 +1,6 @@
 # Exploratory: store trips as patterns instead of 3M `stop_times` rows
 
-**Type:** exploratory redesign. Decide after 14–19 have landed and been measured.
+**Type:** exploratory redesign. Decide after 09 and 15–19 have landed and been measured.
 **Touches (if pursued):** new tables, the static loader, every query that reads `stop_times` (arrivals, nearby, trip detail, route detail, `route_stops`/`route_branches` builds)
 **Depends on:** 15, 17, 18, 19
 
@@ -49,9 +49,9 @@ So 118k trips are 1.2k _routes through the network_, run on 10k _timetables_, ea
 
 ## Decision gate
 
-Pursue this only if, after plans 14–19, either:
+Pursue this only if, after plans 09 and 15–19, either:
 
-- `stop_times` and its indexes don't fit comfortably in `shared_buffers` (check the hit ratio from plan 14), or
+- `stop_times` and its indexes don't fit comfortably in `shared_buffers` (check the hit ratio from plan 09), or
 - the project adds agencies, so total `stop_times` grows several times over.
 
 If pursued, start with a read-only prototype: build the pattern tables from a loaded database with SQL, then compare arrivals at the four benchmark stops (plan 18) for equality and latency before touching the loader.
