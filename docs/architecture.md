@@ -132,7 +132,7 @@ The `getArrivals` endpoint performs a matching neighbor lookup via PostGIS `ST_D
 
 NestJS standalone application sharing the same codebase as the API. Runs two scheduled jobs, registered at startup from validated config (`GTFS_STATIC_CRON`, `GTFS_REALTIME_POLL_INTERVAL_MS`):
 
-- **Static cron (`GTFS_STATIC_CRON`)** — downloads the agency's GTFS static ZIP, validates it, parses all CSV files, and writes to PostgreSQL in a `SERIALIZABLE` transaction (DELETE-then-INSERT scoped by `agency_id`)
+- **Static cron (`GTFS_STATIC_CRON`)** — downloads the agency's GTFS static ZIP, stages every file in temp tables, and swaps the agency's rows in one short transaction (see [Static GTFS Ingestion](#static-gtfs-ingestion))
 - **Realtime poll (`GTFS_REALTIME_POLL_INTERVAL_MS`, default 15 s)** — fetches the GTFS-RT protobuf feed, decodes it, filters vehicle positions against known `trip_id` values, and writes to Redis with a 30 s TTL
 
 Liveness: each completed realtime poll loop touches `WORKER_FILE_LIVENESS_PATH`; the compose healthcheck requires it to be under 2 minutes old. Docker doesn't restart unhealthy containers, so the worker also exits itself when the loop hasn't completed for 3 minutes, and the `unless-stopped` policy restarts it. A loop that completes with upstream feed errors still counts as alive, so an MBTA outage doesn't cause restarts.
@@ -148,7 +148,7 @@ Static GTFS data source of truth. Key design decisions:
 - All tables have an `agency_id UUID FK` column — row-level agency isolation with no schema duplication
 - `stops.location` is a `GEOMETRY(Point, 4326)` column with a GiST index for PostGIS spatial queries
 - `stop_times.departure_time` (GTFS/DB field, not user-facing; all user-facing references use arrivals terminology) is stored as PostgreSQL `INTERVAL` to correctly handle GTFS post-midnight times (e.g. `25:30:00`)
-- Ingestion uses a `SERIALIZABLE` transaction with 1 000-row batched INSERTs for ~500 K stop-time rows
+- Static ingestion stages each load in session-private temp tables and swaps it in with one transaction, so readers see either the old or the new data set, never a mix
 
 ### Redis (`cache:6379`)
 
@@ -172,17 +172,22 @@ config/agencies.json
 AgenciesService.getAllAgencies()
       │
       ▼
-GtfsStaticService.ingest(agency)
-  1. HTTP GET agency.gtfsStaticUrl → ZIP blob
-  2. Validate Content-Type + byte size
-  3. Extract CSV files from ZIP
-  4. Parse routes.txt, stops.txt, trips.txt, stop_times.txt,
-     shapes.txt, calendar.txt, calendar_dates.txt
-  5. BEGIN SERIALIZABLE transaction
-     DELETE FROM routes/stops/trips/... WHERE agency_id = $id
-     INSERT in 1000-row batches
-  6. COMMIT
-  7. UPDATE agencies SET last_ingested_at = NOW()
+GtfsStaticService.ingestAgency(agency)
+  1. GET agency.gtfsStaticUrl to disk (5 min timeout, 200 MB cap)
+  2. Extract only the GTFS files it loads (1 GB cap, checked against the
+     zip directory and while extracting); require agency, stops, routes,
+     trips, stop_times and calendar or calendar_dates
+  3. On one pinned connection: CREATE TEMP TABLE stage_* (LIKE live)
+     and COPY each file in, validating and escaping every field
+     (bad rows are dropped and counted)
+  4. Build route_stops, route_branches, routes.has_stop_times and
+     colocated stop groups from the staging tables
+  5. Refuse the load if a core table is empty or under 50% of the
+     current rows
+  6. BEGIN; for each table DELETE the agency's rows, INSERT ... SELECT
+     from staging; UPDATE agencies SET last_ingested_at, data_version + 1;
+     COMMIT
+  7. DROP the temp tables; ANALYZE
 ```
 
 ### Realtime GTFS-RT Ingestion

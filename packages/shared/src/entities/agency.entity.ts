@@ -27,6 +27,10 @@ export class Agency {
   @Column({ name: 'last_ingested_at', type: 'timestamptz', nullable: true })
   lastIngestedAt!: Date | null;
 
+  /** Bumped by every successful static GTFS load; lets caches key on the data set. */
+  @Column({ name: 'data_version', type: 'integer', default: 0 })
+  dataVersion!: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }
