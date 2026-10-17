@@ -34,6 +34,7 @@ function renderClient(initialArrivals: Arrival[]) {
       initialAlerts={[]}
       initialStopName="Mass Ave @ Main St"
       stopId="stop-1"
+      routeIds={['1']}
     />,
   );
 }
