@@ -18,17 +18,18 @@ All tables share a common design principle: every row includes an `agency_id UUI
 
 One row per configured transit provider.
 
-| Column              | Type           | Constraints                                    |
-| ------------------- | -------------- | ---------------------------------------------- |
-| `agency_id`         | `UUID`         | `PRIMARY KEY`                                  |
-| `agency_key`        | `VARCHAR(50)`  | `UNIQUE NOT NULL` — URL-slug (e.g. `mbta`)     |
-| `display_name`      | `TEXT`         | `NOT NULL`                                     |
-| `timezone`          | `VARCHAR(64)`  | `NOT NULL` — IANA timezone string              |
-| `gtfs_static_url`   | `TEXT`         | `NOT NULL`                                     |
-| `gtfs_realtime_url` | `TEXT`         | nullable                                       |
-| `api_key_env_var`   | `VARCHAR(128)` | nullable — name of env var holding the API key |
-| `last_ingested_at`  | `TIMESTAMPTZ`  | nullable                                       |
-| `created_at`        | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                |
+| Column              | Type           | Constraints                                                       |
+| ------------------- | -------------- | ----------------------------------------------------------------- |
+| `agency_id`         | `UUID`         | `PRIMARY KEY`                                                     |
+| `agency_key`        | `VARCHAR(50)`  | `UNIQUE NOT NULL` — URL-slug (e.g. `mbta`)                        |
+| `display_name`      | `TEXT`         | `NOT NULL`                                                        |
+| `timezone`          | `VARCHAR(64)`  | `NOT NULL` — IANA timezone string                                 |
+| `gtfs_static_url`   | `TEXT`         | `NOT NULL`                                                        |
+| `gtfs_realtime_url` | `TEXT`         | nullable                                                          |
+| `api_key_env_var`   | `VARCHAR(128)` | nullable — name of env var holding the API key                    |
+| `last_ingested_at`  | `TIMESTAMPTZ`  | nullable                                                          |
+| `data_version`      | `INTEGER`      | `NOT NULL DEFAULT 0`; incremented by every successful static load |
+| `created_at`        | `TIMESTAMPTZ`  | `DEFAULT NOW()`                                                   |
 
 ### `routes`
 
@@ -262,17 +263,13 @@ Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpda
 
 ## Ingestion Pattern
 
-Each agency's static GTFS ingest uses **auto-committed batches** (no wrapping transaction). A single `SERIALIZABLE` transaction across 4M+ rows causes PostgreSQL WAL overflow and crashes on low-memory hosts.
+Each static load is atomic per agency: readers see the complete old data set until the new one commits, and a failure at any point before the commit leaves the live tables untouched.
 
-Order of operations:
+1. Download the zip and extract only the files it loads, with size caps. A feed missing `agency.txt`, `stops.txt`, `routes.txt`, `trips.txt`, `stop_times.txt`, or both calendar files is refused.
+2. On one pinned connection, create session-private staging tables (`CREATE TEMP TABLE stage_<table> (LIKE <table> INCLUDING DEFAULTS)`) and `COPY` each file into its table. Every field is escaped, and GTFS times (`H:MM:SS`, hours may pass 24), integers, dates and coordinates are validated; invalid rows are dropped and counted in the log.
+3. Compute `route_stops`, `route_branches`, `routes.has_stop_times` and `stops.colocated_group_id` from the staging tables, outside any transaction.
+4. Compare row counts: the load is refused if `routes`, `stops`, `trips` or `stop_times` is empty or under 50% of the current rows, or if there are no calendar rows.
+5. In one transaction, for each table: `DELETE … WHERE agency_id = $1`, then `INSERT … SELECT` from staging (`ON CONFLICT DO NOTHING` drops rows the feed repeats). `agencies.last_ingested_at` and `agencies.data_version` (incremented each load) are updated in the same transaction.
+6. Drop the staging tables and `ANALYZE`.
 
-1. Upsert agency row
-2. DELETE existing child rows (stop_times → trips → shapes → calendars → stops → routes)
-3. `ALTER TABLE stop_times SET UNLOGGED` / `shapes SET UNLOGGED` — eliminates WAL writes during bulk insert
-4. INSERT routes, stops, trips (500-row batches, committed immediately)
-5. Stream-insert shapes (500-row batches)
-6. Stream-insert stop_times (1000-row batches)
-7. INSERT service_calendars and service_calendar_dates
-8. `UPDATE agencies SET last_ingested_at = NOW()`
-
-Because there is no wrapping transaction, a mid-ingest crash leaves the table partially populated. The worker will retry on the next scheduled cron run (default: 04:00 daily) or on the next startup if `GTFS_INGEST_ON_STARTUP=true`. No other agency's rows are touched.
+Temp tables are private to the session and dropped at the end, so a crashed or concurrent load can't leak rows into another.

@@ -1,7 +1,7 @@
 /// <reference types="jest" />
 import { Readable, Writable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { byteLimit } from './gtfs-static.service';
+import { byteLimit } from './static/extract';
 
 const sink = () => {
   const chunks: Buffer[] = [];
