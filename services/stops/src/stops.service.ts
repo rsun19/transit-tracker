@@ -19,6 +19,7 @@ import {
   candidateServiceDates,
   gtfsTimestampSql,
   tripRealtimeField,
+  tripUpdatesFeedTsKey,
   tripUpdatesKey,
   type TripRealtime,
 } from '@transit-tracker/shared';
@@ -34,7 +35,13 @@ import {
   type MergedArrival,
   type ScheduledRow,
 } from './merge-realtime';
-import { StopRouteRef, StopResponse, ArrivalResponse, AddedTripEntry } from './stops.types';
+import {
+  StopRouteRef,
+  StopResponse,
+  ArrivalResponse,
+  ArrivalsResponse,
+  AddedTripEntry,
+} from './stops.types';
 
 // ─── Shared SQL for scheduled stop_times ─────────────────────────────────────
 // Placeholders are passed in because the two arrival queries number their
@@ -250,17 +257,11 @@ export class StopsService {
     agencyKey: string,
     limit = DEFAULT_SEARCH_LIMIT,
     after?: string,
-  ): Promise<{ data: ArrivalResponse[]; stopId: string; agencyKey: string; stopName: string }> {
+  ): Promise<ArrivalsResponse> {
     const cappedLimit = Math.min(limit, MAX_SEARCH_LIMIT);
-    const cacheKey = `cache:arrivals:v6:${agencyKey}:${stopId}:${cappedLimit}:${after ?? 'now'}`;
+    const cacheKey = `cache:arrivals:v7:${agencyKey}:${stopId}:${cappedLimit}:${after ?? 'now'}`;
     const cached = await this.cacheService.get(cacheKey);
-    if (cached)
-      return JSON.parse(cached) as {
-        data: ArrivalResponse[];
-        stopId: string;
-        agencyKey: string;
-        stopName: string;
-      };
+    if (cached) return JSON.parse(cached) as ArrivalsResponse;
 
     const [agRow] = await this.dataSource.query<Array<{ agencyId: string; timezone: string }>>(
       `SELECT "agencyId", timezone FROM agencies WHERE agency_key = $1 LIMIT 1`,
@@ -370,9 +371,10 @@ export class StopsService {
     );
     const rows = sqlRows.map(toScheduledRow);
 
-    const [realtimeByTrip, addedTrips] = await Promise.all([
+    const [realtimeByTrip, addedTrips, lastFeedTimestamp] = await Promise.all([
       this.loadTripRealtime(agencyKey, rows),
       this.loadAddedTrips(agencyKey),
+      this.loadLastFeedTimestamp(agencyKey),
     ]);
 
     const effectiveStopIdSet = new Set(effectiveStopIds);
@@ -395,7 +397,14 @@ export class StopsService {
 
     const data = selectUpcoming(merged, cutoffS, cappedLimit).map(toArrivalResponse);
 
-    const result = { data, stopId, agencyKey, stopName };
+    const result: ArrivalsResponse = {
+      data,
+      stopId,
+      agencyKey,
+      stopName,
+      timezone,
+      feedTimestamp: lastFeedTimestamp,
+    };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ARRIVALS_TTL_S);
     return result;
   }
@@ -485,6 +494,21 @@ export class StopsService {
       /* Redis unavailable — fall back to the schedule */
     }
     return result;
+  }
+
+  /**
+   * When the worker last wrote a TripUpdates feed (epoch s). Kept well past
+   * the predictions' TTL, so a stalled worker reads as stale, not as "no
+   * data". Null if no feed was written in the last day or Redis is down.
+   */
+  private async loadLastFeedTimestamp(agencyKey: string): Promise<number | null> {
+    try {
+      const raw = await this.cacheService.getClient().get(tripUpdatesFeedTsKey(agencyKey));
+      const ts = raw === null ? NaN : Number(raw);
+      return Number.isFinite(ts) ? ts : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Reads added_trips:v2. Trips without a route can't be placed and are skipped. */

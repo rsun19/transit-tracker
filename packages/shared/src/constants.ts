@@ -5,6 +5,9 @@ export const ALERTS_CACHE_TTL_S = 30;
 // About 3x the realtime poll interval, so one or two failed polls don't blank
 // out predictions, but a dead feed stops being served within a minute.
 export const TRIP_UPDATE_CACHE_TTL_S = 60;
+// The last-feed timestamp is kept much longer than the predictions, so a
+// stalled worker shows up as "updated N min ago" rather than no data.
+export const TRIP_UPDATE_FEED_TS_TTL_S = 24 * 3600;
 // A GTFS-RT feed whose header timestamp is older than this is treated as stale
 // and not written to Redis.
 export const REALTIME_FEED_MAX_AGE_S = 120;

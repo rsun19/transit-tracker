@@ -58,6 +58,21 @@ export interface ArrivalResponse {
   uncertaintySeconds: number | null;
 }
 
+export interface ArrivalsResponse {
+  data: ArrivalResponse[];
+  stopId: string;
+  agencyKey: string;
+  stopName: string;
+  /** Agency IANA timezone; clients show times in it, as the agency does. */
+  timezone: string;
+  /**
+   * Header timestamp (epoch s) of the last realtime feed the worker wrote.
+   * Still set after the predictions themselves expire, so clients can show
+   * how stale they are; null if no feed was written in the last day.
+   */
+  feedTimestamp: number | null;
+}
+
 export interface AddedTripEntry {
   trip: {
     tripId: string;

@@ -6,11 +6,16 @@ import Box from '@mui/material/Box';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Link from '@mui/material/Link';
 import { fetchStopArrivals, fetchAlerts, type Arrival, type Alert } from '@/lib/api-client';
+import { DEFAULT_AGENCY_TIMEZONE, formatAge } from '@/lib/format-time';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ServiceAlerts } from '@/components/ui/ServiceAlerts';
 import ArrivalTable from './ArrivalTable';
 
 const DEFAULT_AGENCY = 'mbta';
+const POLL_INTERVAL_MS = 15_000;
+// Predictions older than this get a warning. The worker polls every 15 s and
+// drops feeds older than 120 s, so this only shows when ingestion has stalled.
+const STALE_FEED_S = 120;
 const DIRECTION_LABELS: Record<number, string> = {
   0: 'Outbound',
   1: 'Inbound',
@@ -36,19 +41,26 @@ export default function StopArrivalsClient({
   const [stopName, setStopName] = useState<string>(initialStopName);
   const [alerts, setAlerts] = useState<Alert[]>(initialAlerts);
   const [error, setError] = useState<string | null>(null);
+  const [timeZone, setTimeZone] = useState(DEFAULT_AGENCY_TIMEZONE);
+  const [feedTimestamp, setFeedTimestamp] = useState<number | null>(null);
 
   // Track current time so filtering is always up-to-date
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     let isMounted = true;
+    // Only the newest request may update state: a slow poll started before
+    // the tab was hidden must not overwrite the refresh done on return.
+    let latestRequest = 0;
     const fetchArrivals = async () => {
+      const request = ++latestRequest;
+      const isCurrent = () => isMounted && request === latestRequest;
       try {
         const [arrData, alertsData] = await Promise.all([
           fetchStopArrivals(stopId, DEFAULT_AGENCY),
           fetchAlerts({ stopId, routeIds, agencyKey: DEFAULT_AGENCY }),
         ]);
-        if (!isMounted) return;
+        if (!isCurrent()) return;
         // Sort arrivals by .realtimeArrival ascending before setting state
         const sortedArrivals = [...arrData.data].sort((a, b) => {
           const tA = new Date(a.realtimeArrival).getTime();
@@ -57,10 +69,12 @@ export default function StopArrivalsClient({
         });
         setArrivals(sortedArrivals);
         setStopName(arrData.stopName || stopId);
+        setTimeZone(arrData.timezone ?? DEFAULT_AGENCY_TIMEZONE);
+        setFeedTimestamp(arrData.feedTimestamp ?? null);
         setAlerts(alertsData.alerts);
         setError(null);
       } catch (err: unknown) {
-        if (!isMounted) return;
+        if (!isCurrent()) return;
         if (err instanceof Error) {
           setError(err.message);
         } else {
@@ -68,20 +82,32 @@ export default function StopArrivalsClient({
         }
       }
     };
-    // Unified 15s interval for both arrivals and now
+    // Fetch right away (the server-rendered data may already be a poll old),
+    // then every 15 s while the tab is visible, and again when it comes back.
+    const isVisible = () => document.visibilityState !== 'hidden';
+    fetchArrivals();
     const interval = setInterval(() => {
-      fetchArrivals();
-      setNow(Date.now());
-    }, 15000);
-    // Also update now immediately on mount
-    setNow(Date.now());
+      if (isVisible()) fetchArrivals();
+    }, POLL_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (isVisible()) fetchArrivals();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       isMounted = false;
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
     // routeIds comes from the server render and doesn't change for a stop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopId]);
+
+  // Tick every second so departed rows drop off, "Boarding"/"Arriving" switch
+  // on time, and the feed age stays current between polls.
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
 
   // Drop arrivals whose vehicle has already left. A train that has arrived
   // but not departed is still boarding and stays listed.
@@ -109,6 +135,8 @@ export default function StopArrivalsClient({
   }, [filteredArrivals]);
 
   const isGrouped = directionGroups.length > 1;
+  const feedAgeS = feedTimestamp !== null ? Math.max(0, now / 1000 - feedTimestamp) : null;
+  const isFeedStale = feedAgeS !== null && feedAgeS > STALE_FEED_S;
   const displayName = stopName || stopId;
 
   return (
@@ -125,20 +153,35 @@ export default function StopArrivalsClient({
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Upcoming arrivals
+        {feedAgeS !== null && (
+          <Box
+            component="span"
+            sx={{ display: 'block', color: isFeedStale ? 'warning.main' : 'text.secondary' }}
+          >
+            {isFeedStale
+              ? `Live predictions may be out of date (updated ${formatAge(feedAgeS)})`
+              : `Live predictions updated ${formatAge(feedAgeS)}`}
+          </Box>
+        )}
       </Typography>
 
       {error && <EmptyState message="Could not load arrivals" suggestion={error} />}
       {!error && <ServiceAlerts alerts={alerts} />}
-      {!error && arrivals.length === 0 && (
+      {!error && filteredArrivals.length === 0 && (
         <EmptyState
           message="No upcoming arrivals"
           suggestion="There are no scheduled arrivals for this stop right now."
         />
       )}
-      {!error && arrivals.length > 0 && !isGrouped && (
-        <ArrivalTable title="All Arrivals" arrivals={arrivals} />
+      {!error && filteredArrivals.length > 0 && !isGrouped && (
+        <ArrivalTable
+          title="All Arrivals"
+          arrivals={filteredArrivals}
+          timeZone={timeZone}
+          now={now}
+        />
       )}
-      {!error && arrivals.length > 0 && isGrouped && (
+      {!error && filteredArrivals.length > 0 && isGrouped && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {directionGroups.map(([dirId, arrivals], idx) => {
             const label =
@@ -172,7 +215,7 @@ export default function StopArrivalsClient({
                     </Link>
                   );
                 })}
-                <ArrivalTable title={label} arrivals={arrivals} />
+                <ArrivalTable title={label} arrivals={arrivals} timeZone={timeZone} now={now} />
               </Box>
             );
           })}

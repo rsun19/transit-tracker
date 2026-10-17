@@ -182,6 +182,7 @@ export class GtfsRealtimeService {
         parsed.tripUpdates,
         parsed.addedTrips,
         TRIP_UPDATE_CACHE_TTL_S,
+        parsed.feedTimestamp ?? Math.floor(Date.now() / 1000),
       );
       if (!written) {
         this.logger.warn(

@@ -236,14 +236,15 @@ All foreign key relationships cascade `ON DELETE CASCADE` from `agencies`, so dr
 
 ### Realtime keys (written by ingestion worker)
 
-| Key                           | Type     | Content                                                                                                     | TTL  |
-| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- | ---- |
-| `vehicles:{agencyKey}`        | `STRING` | JSON array of vehicle positions                                                                             | 30 s |
-| `alerts:{agencyKey}`          | `STRING` | JSON array of service alerts                                                                                | 30 s |
-| `trip_updates:v2:{agencyKey}` | `HASH`   | `trip_id@YYYYMMDD` (or bare `trip_id`) → JSON `TripRealtime` for static trips (and canceled)                | 60 s |
-| `added_trips:v2:{agencyKey}`  | `HASH`   | same field (plus `#start_time` for DUPLICATED) → JSON `TripRealtime` for ADDED / DUPLICATED / unknown trips | 60 s |
+| Key                                | Type     | Content                                                                                                     | TTL  |
+| ---------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- | ---- |
+| `vehicles:{agencyKey}`             | `STRING` | JSON array of vehicle positions                                                                             | 30 s |
+| `alerts:{agencyKey}`               | `STRING` | JSON array of service alerts                                                                                | 30 s |
+| `trip_updates:v2:{agencyKey}`      | `HASH`   | `trip_id@YYYYMMDD` (or bare `trip_id`) → JSON `TripRealtime` for static trips (and canceled)                | 60 s |
+| `added_trips:v2:{agencyKey}`       | `HASH`   | same field (plus `#start_time` for DUPLICATED) → JSON `TripRealtime` for ADDED / DUPLICATED / unknown trips | 60 s |
+| `trip_updates:feed_ts:{agencyKey}` | `STRING` | Header timestamp (epoch s) of the last TripUpdates feed written, set in the same `MULTI`                    | 24 h |
 
-Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpdatesKey`, `addedTripsKey`, `alertsKey`); don't hand-build them. The two hashes are replaced in one `MULTI` (write to `:tmp`, `EXPIRE`, `RENAME`), so readers never see them missing or half-written. If a key expires (worker stopped or feed down), the vehicles endpoint returns `503`, the alerts endpoint returns an empty array, and arrivals fall back to the schedule.
+Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpdatesKey`, `addedTripsKey`, `tripUpdatesFeedTsKey`, `alertsKey`); don't hand-build them. The two hashes are replaced in one `MULTI` (write to `:tmp`, `EXPIRE`, `RENAME`), so readers never see them missing or half-written. If a key expires (worker stopped or feed down), the vehicles endpoint returns `503`, the alerts endpoint returns an empty array, and arrivals fall back to the schedule.
 
 ### API response cache keys (written by API server)
 
@@ -251,7 +252,7 @@ Key names come from the builders in `packages/shared/src/realtime.ts` (`tripUpda
 | -------------------------------------------------------- | ----- | ----------------------------------------------------- |
 | `cache:routes:{agencyKey}`                               | 300 s | Expires naturally; refreshed after GTFS static ingest |
 | `cache:route:v2:{agencyKey}:{routeId}`                   | 300 s | —                                                     |
-| `cache:arrivals:v6:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
+| `cache:arrivals:v7:{agencyKey}:{stopId}:{limit}:{after}` | 5 s   | —                                                     |
 | `cache:stops:nearby:{lat3dp}:{lon3dp}:{radius}`          | 45 s  | —                                                     |
 | `cache:trip:{agencyKey}:{tripId}:{serviceDate\|current}` | 60 s  | —                                                     |
 

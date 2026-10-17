@@ -1,6 +1,12 @@
 import type Redis from 'ioredis';
 import type { ChainableCommander } from 'ioredis';
-import { addedTripsKey, tripUpdatesKey, type TripRealtime } from '@transit-tracker/shared';
+import {
+  TRIP_UPDATE_FEED_TS_TTL_S,
+  addedTripsKey,
+  tripUpdatesFeedTsKey,
+  tripUpdatesKey,
+  type TripRealtime,
+} from '@transit-tracker/shared';
 
 /**
  * Replaces the trip_updates and added_trips hashes for an agency in one MULTI.
@@ -13,6 +19,10 @@ import { addedTripsKey, tripUpdatesKey, type TripRealtime } from '@transit-track
  * instead of serving old predictions forever. A non-empty feed is
  * authoritative for both keys: a hash with no entries is deleted.
  *
+ * The feed timestamp is recorded in the same MULTI under a longer-lived key
+ * (tripUpdatesFeedTsKey), so clients can report staleness once the hashes
+ * have expired.
+ *
  * @returns false when nothing was written because the feed was empty.
  */
 export async function writeTripUpdates(
@@ -21,12 +31,14 @@ export async function writeTripUpdates(
   tripUpdates: ReadonlyMap<string, TripRealtime>,
   addedTrips: ReadonlyMap<string, TripRealtime>,
   ttlSeconds: number,
+  feedTimestamp: number,
 ): Promise<boolean> {
   if (tripUpdates.size === 0 && addedTrips.size === 0) return false;
 
   const tx = redis.multi();
   swapHash(tx, tripUpdatesKey(agencyKey), tripUpdates, ttlSeconds);
   swapHash(tx, addedTripsKey(agencyKey), addedTrips, ttlSeconds);
+  tx.set(tripUpdatesFeedTsKey(agencyKey), String(feedTimestamp), 'EX', TRIP_UPDATE_FEED_TS_TTL_S);
 
   const results = await tx.exec();
   if (!results) throw new Error('Redis MULTI was aborted');
