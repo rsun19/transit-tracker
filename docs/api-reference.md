@@ -285,7 +285,7 @@ Upcoming departures for a stop, merged with GTFS-RT predictions. Trips scheduled
 
 - Times are the **arrival** time, else the departure (a trip's first stop), as MBTA shows them. `departureTime` is when the vehicle leaves the stop; between the two it is boarding. A train stays listed until its predicted departure, so one at the platform can show an arrival time just in the past.
 - `timezone` is the agency's IANA timezone. Clients show times in it, as station clocks and mbta.com do, whatever the device's timezone.
-- `feedTimestamp` is the header timestamp (epoch seconds) of the GTFS-RT feed the predictions came from, or `null` when no realtime data was available. The stop page shows its age and warns past 2 minutes.
+- `feedTimestamp` is the header timestamp (epoch seconds) of the last GTFS-RT TripUpdates feed the worker wrote. It stays set after the predictions expire (it's kept for a day), so a stalled worker reads as stale rather than as no data; `null` if no feed was written in the last day. The stop page shows its age and warns past 2 minutes.
 - `realtimeArrival` is the effective time (`predictedTime` if present, else `scheduledTime`), kept for compatibility.
 - `realtimeDelaySeconds` is `predictedTime − scheduledTime`; `null` without a prediction.
 - `hasRealtime` is true only when a prediction exists.

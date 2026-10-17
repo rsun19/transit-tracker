@@ -46,13 +46,18 @@ export default function StopArrivalsClient({
 
   useEffect(() => {
     let isMounted = true;
+    // Only the newest request may update state: a slow poll started before
+    // the tab was hidden must not overwrite the refresh done on return.
+    let latestRequest = 0;
     const fetchArrivals = async () => {
+      const request = ++latestRequest;
+      const isCurrent = () => isMounted && request === latestRequest;
       try {
         const [arrData, alertsData] = await Promise.all([
           fetchStopArrivals(stopId, DEFAULT_AGENCY),
           fetchAlerts({ stopId, agencyKey: DEFAULT_AGENCY }),
         ]);
-        if (!isMounted) return;
+        if (!isCurrent()) return;
         // Sort arrivals by .realtimeArrival ascending before setting state
         const sortedArrivals = [...arrData.data].sort((a, b) => {
           const tA = new Date(a.realtimeArrival).getTime();
@@ -61,12 +66,12 @@ export default function StopArrivalsClient({
         });
         setArrivals(sortedArrivals);
         setStopName(arrData.stopName || stopId);
-        if (arrData.timezone) setTimeZone(arrData.timezone);
+        setTimeZone(arrData.timezone ?? DEFAULT_AGENCY_TIMEZONE);
         setFeedTimestamp(arrData.feedTimestamp ?? null);
         setAlerts(alertsData.alerts);
         setError(null);
       } catch (err: unknown) {
-        if (!isMounted) return;
+        if (!isCurrent()) return;
         if (err instanceof Error) {
           setError(err.message);
         } else {

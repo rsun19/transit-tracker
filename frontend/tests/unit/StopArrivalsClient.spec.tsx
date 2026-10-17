@@ -155,4 +155,59 @@ describe('StopArrivalsClient', () => {
       jest.useRealTimers();
     }
   });
+
+  it('falls back to Boston time when a later response has no timezone', async () => {
+    const at = '2099-10-15T12:42:00.000Z';
+    mockArrivals.mockResolvedValueOnce({
+      data: [arrival({ realtimeArrival: at })],
+      stopId: 'stop-1',
+      agencyKey: 'mbta',
+      stopName: 'Mass Ave @ Main St',
+      timezone: 'America/Chicago',
+    });
+    jest.useFakeTimers();
+    try {
+      renderClient([]);
+      await act(async () => {});
+      expect(screen.getByText('7:42 AM')).toBeInTheDocument();
+
+      mockArrivals.mockResolvedValueOnce({
+        data: [arrival({ realtimeArrival: at })],
+        stopId: 'stop-1',
+        agencyKey: 'mbta',
+        stopName: 'Mass Ave @ Main St',
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+      expect(screen.getByText('8:42 AM')).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores a slower, older response that finishes after a newer one', async () => {
+    const response = (headsign: string) => ({
+      data: [arrival({ headsign })],
+      stopId: 'stop-1',
+      agencyKey: 'mbta',
+      stopName: 'Mass Ave @ Main St',
+    });
+    let resolveOld!: (v: ReturnType<typeof response>) => void;
+    mockArrivals
+      .mockReturnValueOnce(new Promise((r) => (resolveOld = r))) // mount: slow
+      .mockResolvedValueOnce(response('Newer Data')); // visibility refresh
+    renderClient([]);
+
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(await screen.findByText('Newer Data')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOld(response('Older Data'));
+    });
+    expect(screen.getByText('Newer Data')).toBeInTheDocument();
+    expect(screen.queryByText('Older Data')).not.toBeInTheDocument();
+  });
 });

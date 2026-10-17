@@ -19,6 +19,7 @@ import {
   candidateServiceDates,
   gtfsTimestampSql,
   tripRealtimeField,
+  tripUpdatesFeedTsKey,
   tripUpdatesKey,
   type TripRealtime,
 } from '@transit-tracker/shared';
@@ -370,9 +371,10 @@ export class StopsService {
     );
     const rows = sqlRows.map(toScheduledRow);
 
-    const [realtimeByTrip, addedTrips] = await Promise.all([
+    const [realtimeByTrip, addedTrips, lastFeedTimestamp] = await Promise.all([
       this.loadTripRealtime(agencyKey, rows),
       this.loadAddedTrips(agencyKey),
+      this.loadLastFeedTimestamp(agencyKey),
     ]);
 
     const effectiveStopIdSet = new Set(effectiveStopIds);
@@ -395,16 +397,13 @@ export class StopsService {
 
     const data = selectUpcoming(merged, cutoffS, cappedLimit).map(toArrivalResponse);
 
-    // Every entry in a hash comes from the same feed poll; the newest one
-    // tells the client how fresh the predictions are.
-    const feedTimestamps = [...realtimeByTrip.values(), ...addedTrips].map((t) => t.feedTimestamp);
     const result: ArrivalsResponse = {
       data,
       stopId,
       agencyKey,
       stopName,
       timezone,
-      feedTimestamp: feedTimestamps.length > 0 ? Math.max(...feedTimestamps) : null,
+      feedTimestamp: lastFeedTimestamp,
     };
     await this.cacheService.set(cacheKey, JSON.stringify(result), API_CACHE_ARRIVALS_TTL_S);
     return result;
@@ -495,6 +494,21 @@ export class StopsService {
       /* Redis unavailable — fall back to the schedule */
     }
     return result;
+  }
+
+  /**
+   * When the worker last wrote a TripUpdates feed (epoch s). Kept well past
+   * the predictions' TTL, so a stalled worker reads as stale, not as "no
+   * data". Null if no feed was written in the last day or Redis is down.
+   */
+  private async loadLastFeedTimestamp(agencyKey: string): Promise<number | null> {
+    try {
+      const raw = await this.cacheService.getClient().get(tripUpdatesFeedTsKey(agencyKey));
+      const ts = raw === null ? NaN : Number(raw);
+      return Number.isFinite(ts) ? ts : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Reads added_trips:v2. Trips without a route can't be placed and are skipped. */

@@ -75,6 +75,14 @@ export const tripUpdatesKey = (agencyKey: string): string => `trip_updates:v2:${
 /** Hash: unique per trip instance -> JSON TripRealtime, for ADDED/DUPLICATED trips and trip_ids not in static GTFS. */
 export const addedTripsKey = (agencyKey: string): string => `added_trips:v2:${agencyKey}`;
 
+/**
+ * String: header timestamp (epoch s) of the last TripUpdates feed written.
+ * Outlives the prediction hashes, so readers can still tell how stale the
+ * data is after the worker stops and the hashes expire.
+ */
+export const tripUpdatesFeedTsKey = (agencyKey: string): string =>
+  `trip_updates:feed_ts:${agencyKey}`;
+
 /** String: JSON ServiceAlert[]. */
 export const alertsKey = (agencyKey: string): string => `alerts:${agencyKey}`;
 
