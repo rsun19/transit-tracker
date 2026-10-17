@@ -13,10 +13,12 @@ export type StopHierarchy = {
  *
  * @param stops used to widen each alert's `stopIds` to the parent station and
  *   child platforms of every informed stop. Pass null to keep exact stop ids.
+ * @param effectDetails Alert.effect_detail by entity id (see effect-detail.ts).
  */
 export function parseAlerts(
   feed: transit_realtime.IFeedMessage,
   stops: StopHierarchy | null,
+  effectDetails: ReadonlyMap<string, string> = new Map(),
 ): ServiceAlert[] {
   const alerts: ServiceAlert[] = [];
 
@@ -46,6 +48,7 @@ export function parseAlerts(
       headerText: englishText(alert.headerText),
       descriptionText: englishText(alert.descriptionText),
       effect: enumName(transit_realtime.Alert.Effect, alert, 'effect', 'UNKNOWN_EFFECT'),
+      effectDetail: effectDetails.get(entity.id ?? '') ?? null,
       cause: enumName(transit_realtime.Alert.Cause, alert, 'cause', 'UNKNOWN_CAUSE'),
       severityLevel: enumName(
         transit_realtime.Alert.SeverityLevel,

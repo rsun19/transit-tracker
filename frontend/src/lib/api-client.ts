@@ -132,6 +132,8 @@ export interface Alert {
   severityLevel?: string;
   /** Service disruption or SEVERE; everything else can be folded away. */
   urgent?: boolean;
+  /** Agency's finer category, e.g. DELAY, SHUTTLE, ELEVATOR_CLOSURE. */
+  effectDetail?: string | null;
 }
 
 export interface Agency {
@@ -209,12 +211,21 @@ export function fetchAlerts(params?: {
   agencyKey?: string;
   routeId?: string;
   stopId?: string;
+  /** With stopId: routes serving the stop, so their line-wide alerts are included. */
+  routeIds?: string[];
 }): Promise<{ alerts: Alert[] }> {
   const qs = new URLSearchParams();
   if (params?.agencyKey) qs.set('agencyKey', params.agencyKey);
   if (params?.routeId) qs.set('routeId', params.routeId);
   if (params?.stopId) qs.set('stopId', params.stopId);
+  if (params?.routeIds?.length) qs.set('routeIds', params.routeIds.join(','));
   return apiFetch<{ alerts: Alert[] }>(`/alerts?${qs}`);
+}
+
+export function fetchStopRouteIds(stopId: string, agencyKey: string): Promise<string[]> {
+  return apiFetch<{ data: { routeId: string }[] }>(
+    `/stops/${encodeURIComponent(stopId)}/routes?agencyKey=${encodeURIComponent(agencyKey)}`,
+  ).then((res) => res.data.map((r) => r.routeId));
 }
 
 export function fetchNearbyStops(
